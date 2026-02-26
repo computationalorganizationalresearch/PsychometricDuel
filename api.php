@@ -1,44 +1,44 @@
 <?php
 /*
  * Validity Wars: Power Protocol — Multiplayer API
- * Game state stored in text files named {room_code}.txt
- * Each file contains JSON with full game state.
+ * State is persisted in /rooms/{room_code}.txt as JSON.
  */
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
-
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
 $DATA_DIR = __DIR__ . '/rooms/';
 if (!is_dir($DATA_DIR)) mkdir($DATA_DIR, 0777, true);
 
+const MAX_HAND_SIZE = 10;
+const STARTING_HAND_SIZE = 10;
+const MONSTER_BASE_N = 20;
+const META_BASE_N = 220;
+
 $MONSTER_SPRITES = ['⚔️','🐉','🦁','🔥','💎','🌟','🗡️','🛡️','👁️','🌀'];
 
 $input = json_decode(file_get_contents('php://input'), true);
-if (!$input || !isset($input['action'])) {
-    respond(false, 'Missing action');
-}
+if (!$input || !isset($input['action'])) respond(false, 'Missing action');
 
-$action = $input['action'];
-
-switch ($action) {
+switch ($input['action']) {
     case 'create_room': createRoom(); break;
-    case 'join_room':   joinRoom($input); break;
-    case 'poll':        pollState($input); break;
+    case 'join_room': joinRoom($input); break;
+    case 'poll': pollState($input); break;
     case 'submit_move': submitMove($input); break;
+    case 'submit_mulligan': submitMulligan($input); break;
     default: respond(false, 'Unknown action');
 }
 
-// ========== RESPONSES ==========
 function respond($success, $msg = '', $data = []) {
     echo json_encode(array_merge(['success' => $success, 'message' => $msg], $data), JSON_UNESCAPED_UNICODE);
     exit;
 }
 
-// ========== ROOM MANAGEMENT ==========
+function clamp($v, $lo, $hi) { return max($lo, min($hi, $v)); }
+
 function generateRoomCode() {
     $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     $code = '';
@@ -46,9 +46,7 @@ function generateRoomCode() {
     return $code;
 }
 
-function generateToken() {
-    return bin2hex(random_bytes(16));
-}
+function generateToken() { return bin2hex(random_bytes(16)); }
 
 function getRoomPath($code) {
     global $DATA_DIR;
@@ -58,44 +56,45 @@ function getRoomPath($code) {
 function loadRoom($code) {
     $path = getRoomPath($code);
     if (!file_exists($path)) return null;
-    $fp = fopen($path, 'r');
-    flock($fp, LOCK_SH);
-    $data = json_decode(file_get_contents($path), true);
-    flock($fp, LOCK_UN);
-    fclose($fp);
-    return $data;
+    return json_decode(file_get_contents($path), true);
 }
 
 function saveRoom($code, $state) {
+    file_put_contents(getRoomPath($code), json_encode($state, JSON_UNESCAPED_UNICODE), LOCK_EX);
+}
+
+function withLockedRoom($code, $callback) {
     $path = getRoomPath($code);
-    $fp = fopen($path, 'c');
+    if (!file_exists($path)) respond(false, 'Room not found');
+
+    $fp = fopen($path, 'c+');
     flock($fp, LOCK_EX);
+    $raw = stream_get_contents($fp);
+    $state = json_decode($raw, true);
+    if (!$state) { flock($fp, LOCK_UN); fclose($fp); respond(false, 'Corrupt state'); }
+
+    $result = $callback($state);
+
+    fseek($fp, 0);
     ftruncate($fp, 0);
     fwrite($fp, json_encode($state, JSON_UNESCAPED_UNICODE));
     fflush($fp);
     flock($fp, LOCK_UN);
     fclose($fp);
+
+    return [$state, $result];
 }
 
-// ========== PSYCHOMETRICS DATA ==========
 function getConstructs() {
     return [
-        'cog_ability' => ['name'=>'Cognitive Ability','type'=>'predictor','short'=>'COG','avgR'=>0.65,'sprite'=>'🧠',
-            'indicators'=>[['name'=>'GMA Test','r'=>0.67],['name'=>'Wonderlic','r'=>0.63],['name'=>"Raven's",'r'=>0.64]]],
-        'conscient' => ['name'=>'Conscientiousness','type'=>'predictor','short'=>'CON','avgR'=>0.45,'sprite'=>'📋',
-            'indicators'=>[['name'=>'NEO-PI-R C','r'=>0.47],['name'=>'BFI Consc.','r'=>0.43],['name'=>'HEXACO C','r'=>0.45]]],
-        'struct_int' => ['name'=>'Struct. Interview','type'=>'predictor','short'=>'INT','avgR'=>0.55,'sprite'=>'🎤',
-            'indicators'=>[['name'=>'Behavioral','r'=>0.56],['name'=>'Situational','r'=>0.53],['name'=>'Panel Rtg','r'=>0.55]]],
-        'work_sample' => ['name'=>'Work Sample','type'=>'predictor','short'=>'WST','avgR'=>0.50,'sprite'=>'🔧',
-            'indicators'=>[['name'=>'In-Basket','r'=>0.48],['name'=>'Role Play','r'=>0.52],['name'=>'Present.','r'=>0.50]]],
-        'job_perf' => ['name'=>'Job Performance','type'=>'outcome','short'=>'PERF','avgR'=>0.52,'sprite'=>'⭐',
-            'indicators'=>[['name'=>'Super. Rtg','r'=>0.54],['name'=>'Obj. Output','r'=>0.50],['name'=>'Peer Rtg','r'=>0.52]]],
-        'turnover' => ['name'=>'Turnover','type'=>'outcome','short'=>'TURN','avgR'=>0.40,'sprite'=>'🚪',
-            'indicators'=>[['name'=>'Intent Quit','r'=>0.42],['name'=>'Actual Quit','r'=>0.38],['name'=>'Absent','r'=>0.40]]],
-        'job_sat' => ['name'=>'Job Satisfaction','type'=>'outcome','short'=>'SAT','avgR'=>0.48,'sprite'=>'😊',
-            'indicators'=>[['name'=>'JDI Scale','r'=>0.50],['name'=>'MSQ Score','r'=>0.47],['name'=>'Faces Scale','r'=>0.47]]],
-        'ocb' => ['name'=>'OCB','type'=>'outcome','short'=>'OCB','avgR'=>0.44,'sprite'=>'🤝',
-            'indicators'=>[['name'=>'OCBI Items','r'=>0.46],['name'=>'OCBO Items','r'=>0.42],['name'=>'Altruism','r'=>0.44]]]
+        'cog_ability' => ['name'=>'Cognitive Ability','type'=>'predictor','short'=>'COG','avgR'=>0.65,'sprite'=>'🧠'],
+        'conscient' => ['name'=>'Conscientiousness','type'=>'predictor','short'=>'CON','avgR'=>0.45,'sprite'=>'📋'],
+        'struct_int' => ['name'=>'Struct. Interview','type'=>'predictor','short'=>'INT','avgR'=>0.55,'sprite'=>'🎤'],
+        'work_sample' => ['name'=>'Work Sample','type'=>'predictor','short'=>'WST','avgR'=>0.50,'sprite'=>'🔧'],
+        'job_perf' => ['name'=>'Job Performance','type'=>'outcome','short'=>'PERF','avgR'=>0.52,'sprite'=>'⭐'],
+        'turnover' => ['name'=>'Turnover','type'=>'outcome','short'=>'TURN','avgR'=>0.40,'sprite'=>'🚪'],
+        'job_sat' => ['name'=>'Job Satisfaction','type'=>'outcome','short'=>'SAT','avgR'=>0.48,'sprite'=>'😊'],
+        'ocb' => ['name'=>'OCB','type'=>'outcome','short'=>'OCB','avgR'=>0.44,'sprite'=>'🤝']
     ];
 }
 
@@ -117,65 +116,126 @@ function getMonsterNames() {
     ];
 }
 
-// ========== MATH ==========
 function spearmanBrown($k, $avgR) {
     if ($k <= 0) return 0;
     return ($k * $avgR) / (1 + ($k - 1) * $avgR);
 }
 
-function calcObservedValidity($rTrue, $relX, $relY) {
-    return $rTrue * sqrt($relX) * sqrt($relY);
+function approxPowerFromROBSandN($rObs, $n) {
+    $effect = abs($rObs) * sqrt(max(5, $n));
+    $z = ($effect - 1.35) * 1.15;
+    return clamp(1 / (1 + exp(-$z)), 0.05, 0.99);
 }
 
-function calcPower($rObs, $n) {
-    if ($n <= 3) return 0.05;
-    $z_r = 0.5 * log((1 + $rObs) / (1 - $rObs));
-    $z = $z_r * sqrt($n - 3);
-    $x = $z - 1.96;
-    $p = 1 / (1 + exp(-1.702 * $x));
-    return min(0.99, max(0.05, $p));
+function refreshMonsterStats(&$m) {
+    if (!$m) return;
+    if (!empty($m['isMeta'])) {
+        $m['power'] = clamp(0.9 + (($m['n'] ?? META_BASE_N) / 1200), 0.9, 0.99);
+        $m['atk'] = $m['baseAtk'];
+        return;
+    }
+
+    $predAlpha = max(0.05, $m['predAlpha'] ?? 0.05);
+    $outAlpha = max(0.05, $m['outAlpha'] ?? 0.05);
+    $m['rObs'] = ($m['rTrue'] ?? 0) * sqrt($predAlpha * $outAlpha);
+    $m['baseAtk'] = clamp((int) round(abs($m['rObs']) * 5200), 300, 3200);
+
+    if (!empty($m['rangeRestricted'])) $m['atk'] = max(100, (int) floor($m['baseAtk'] / 2));
+    else $m['atk'] = $m['baseAtk'];
+
+    $m['power'] = approxPowerFromROBSandN($m['rObs'], $m['n'] ?? MONSTER_BASE_N);
 }
 
-// ========== DECK BUILDING ==========
+function consumeAttackSample(&$monster) {
+    if (!$monster) return;
+    if (!empty($monster['hasReplication'])) {
+        $monster['hasReplication'] = false;
+    } else {
+        $monster['n'] = !empty($monster['isMeta']) ? META_BASE_N : MONSTER_BASE_N;
+    }
+    refreshMonsterStats($monster);
+}
+
+function makeItemCard($constructId, $construct) {
+    return [
+        'isItem' => true,
+        'type' => $construct['type'],
+        'constructId' => $constructId,
+        'construct' => $construct['name'],
+        'short' => $construct['short'],
+        'avgR' => $construct['avgR'],
+        'sprite' => $construct['sprite'],
+        'indicator' => $construct['type'] === 'predictor' ? 'Item indicator' : 'Criterion indicator'
+    ];
+}
+
+function makeSpellCard($id, $type, $name, $icon, $desc) {
+    return ['isItem'=>false,'id'=>$id,'type'=>$type,'name'=>$name,'icon'=>$icon,'desc'=>$desc];
+}
+
 function buildDeck() {
     $constructs = getConstructs();
-    $deck = [];
+    $counts = [
+        'cog_ability'=>4,'conscient'=>4,'struct_int'=>4,'work_sample'=>4,
+        'job_perf'=>4,'turnover'=>4,'job_sat'=>4,'ocb'=>4,
+        'sample_size'=>5,'replication'=>3,'missing_data'=>3,'range_restrict'=>4,'correction'=>3,
+        'bootstrapping'=>4,'cross_validate'=>3,'item_analysis'=>3,
+        'ceiling_effect'=>3,'construct_drift'=>3,'criterion_contam'=>3,
+    ];
 
-    // 2 copies of each indicator
-    for ($i = 0; $i < 2; $i++) {
-        foreach ($constructs as $cKey => $c) {
-            foreach ($c['indicators'] as $ind) {
-                $deck[] = [
-                    'isItem' => true, 'constructId' => $cKey,
-                    'construct' => $c['name'], 'type' => $c['type'],
-                    'indicator' => $ind['name'], 'avgR' => $c['avgR'],
-                    'itemR' => $ind['r'], 'short' => $c['short'], 'sprite' => $c['sprite']
-                ];
+    $spellDefs = [
+        'sample_size'=>['resource','Sample Size','N+100','Increase target friendly monster sample size (N), boosting power.'],
+        'replication'=>['spell','Replication','⟳','Target your monster. Grants an extra attack and preserves N for one attack.'],
+        'missing_data'=>['spell','Missing Data','∅','Destroy any card on the field.'],
+        'range_restrict'=>['trap','Range Restriction','↔','Target enemy monster. Halve ATK.'],
+        'correction'=>['resource','Correction','↺','Target your monster. Restore ATK to max.'],
+        'bootstrapping'=>['spell','Bootstrapping','🧮','Target your monster. +60 N via resampling support.'],
+        'cross_validate'=>['spell','Cross-Validation','⧉','Target your monster. +40 N and grant an extra attack window.'],
+        'item_analysis'=>['spell','Item Analysis','🧩','Target your construct stack. Add one matching item (max 3) to improve reliability.'],
+        'ceiling_effect'=>['trap','Ceiling Effect','⌈⌉','Target enemy monster. Compress variance by resetting N to pilot levels.'],
+        'construct_drift'=>['trap','Construct Drift','↘','Target enemy construct. Remove one stacked item (or destroy stack if only one).'],
+        'criterion_contam'=>['trap','Criterion Contam.','⚠','Target enemy monster. Reduce N by 80, lowering power.'],
+    ];
+
+    $deck = [];
+    foreach ($counts as $id => $n) {
+        for ($i = 0; $i < $n; $i++) {
+            if (isset($constructs[$id])) $deck[] = makeItemCard($id, $constructs[$id]);
+            else {
+                [$type, $name, $icon, $desc] = $spellDefs[$id];
+                $deck[] = makeSpellCard($id, $type, $name, $icon, $desc);
             }
         }
-    }
-
-    // Spells
-    $spells = [
-        ['isItem'=>false,'id'=>'missing_data','type'=>'spell','name'=>'Missing Data','icon'=>'❓','desc'=>'Destroy ANY card on the field.'],
-    ];
-    for ($i = 0; $i < 2; $i++) {
-        $spells[] = ['isItem'=>false,'id'=>'correction','type'=>'spell','name'=>'Attenuation Corr.','icon'=>'✨','desc'=>'Target Your Monster. Restores ATK to True Validity.'];
-        $spells[] = ['isItem'=>false,'id'=>'range_restrict','type'=>'trap','name'=>'Range Restriction','icon'=>'📉','desc'=>'Target Enemy Monster. Halves ATK power.'];
-        $spells[] = ['isItem'=>false,'id'=>'replication','type'=>'spell','name'=>'Replication','icon'=>'👯','desc'=>'Target Your Monster. Can attack twice. Preserves N.'];
-    }
-    $deck = array_merge($deck, $spells);
-
-    // Sample Size cards
-    for ($i = 0; $i < 25; $i++) {
-        $deck[] = ['isItem'=>false,'id'=>'sample_size','type'=>'resource','name'=>'Sample Size','icon'=>'🧑‍🤝‍🧑','desc'=>'Add +100 N to a monster.','n_val'=>100];
     }
 
     shuffle($deck);
     return $deck;
 }
 
-// ========== CREATE ROOM ==========
+function drawCards(&$player, $n) {
+    for ($i = 0; $i < $n; $i++) {
+        if (count($player['hand']) >= MAX_HAND_SIZE) break;
+        if (count($player['deck']) > 0) $player['hand'][] = array_pop($player['deck']);
+    }
+}
+
+function getPlayerNum($state, $token) {
+    if (($state['player1_token'] ?? null) === $token) return 1;
+    if (($state['player2_token'] ?? null) === $token) return 2;
+    return null;
+}
+
+function getMetaTarget($monsters) {
+    if (!$monsters[0] || !$monsters[1] || !$monsters[2]) return null;
+    if ($monsters[0]['predId'] === $monsters[1]['predId'] && $monsters[1]['predId'] === $monsters[2]['predId'] && $monsters[0]['predId'] !== 'META') {
+        return ['type' => 'pred', 'id' => $monsters[0]['predId']];
+    }
+    if ($monsters[0]['outId'] === $monsters[1]['outId'] && $monsters[1]['outId'] === $monsters[2]['outId'] && $monsters[0]['outId'] !== 'META') {
+        return ['type' => 'out', 'id' => $monsters[0]['outId']];
+    }
+    return null;
+}
+
 function createRoom() {
     $code = generateRoomCode();
     while (file_exists(getRoomPath($code))) $code = generateRoomCode();
@@ -184,486 +244,426 @@ function createRoom() {
     $deck1 = buildDeck();
     $deck2 = buildDeck();
 
-    $hand1 = array_splice($deck1, -5);
-    $hand2 = array_splice($deck2, -5);
-
     $state = [
-        'room_code'    => $code,
-        'status'       => 'waiting', // waiting | active | finished
-        'player1_token'=> $token1,
-        'player2_token'=> null,
+        'room_code' => $code,
+        'status' => 'waiting',
+        'player1_token' => $token1,
+        'player2_token' => null,
         'current_turn' => 1,
-        'turn_number'  => 0,
-        'winner'       => null,
-        'last_update'  => time(),
-        'player1' => [
-            'lp' => 8000, 'hand' => $hand1, 'deck' => $deck1,
-            'constructs' => [null,null,null], 'monsters' => [null,null,null],
-            'summoned_this_turn' => false
-        ],
-        'player2' => [
-            'lp' => 8000, 'hand' => $hand2, 'deck' => $deck2,
-            'constructs' => [null,null,null], 'monsters' => [null,null,null],
-            'summoned_this_turn' => false
-        ],
-        'log' => [],
-        'pending_events' => [] // for attack results, dice rolls etc.
+        'turn_number' => 1,
+        'winner' => null,
+        'last_update' => time(),
+        'mulligan' => ['phase' => true, 'done' => ['1' => false, '2' => false]],
+        'player1' => ['lp'=>8000,'hand'=>[],'deck'=>$deck1,'constructs'=>[null,null,null],'monsters'=>[null,null,null],'summoned_this_turn'=>false],
+        'player2' => ['lp'=>8000,'hand'=>[],'deck'=>$deck2,'constructs'=>[null,null,null],'monsters'=>[null,null,null],'summoned_this_turn'=>false],
+        'log' => []
     ];
+
+    drawCards($state['player1'], STARTING_HAND_SIZE);
+    drawCards($state['player2'], STARTING_HAND_SIZE);
 
     saveRoom($code, $state);
     respond(true, 'Room created', ['room_code' => $code, 'player_token' => $token1, 'player_num' => 1]);
 }
 
-// ========== JOIN ROOM ==========
 function joinRoom($input) {
     $code = strtoupper(trim($input['room_code'] ?? ''));
     if (strlen($code) !== 10) respond(false, 'Invalid room code');
 
-    $state = loadRoom($code);
-    if (!$state) respond(false, 'Room not found');
-    if ($state['status'] !== 'waiting') respond(false, 'Room is full or game already started');
+    [$state, $_] = withLockedRoom($code, function (&$state) {
+        if ($state['status'] !== 'waiting') return ['ok' => false, 'msg' => 'Room is full or game already started'];
+        $token2 = generateToken();
+        $state['player2_token'] = $token2;
+        $state['status'] = 'active';
+        $state['last_update'] = time();
+        $state['log'][] = ['msg' => 'Opponent has joined! Opening mulligan phase started.', 'type' => 'info-log'];
+        return ['ok' => true, 'token2' => $token2];
+    });
 
-    $token2 = generateToken();
-    $state['player2_token'] = $token2;
-    $state['status'] = 'active';
-    $state['turn_number'] = 1;
-    $state['last_update'] = time();
-
-    // Reset attack counters for turn start
-    resetMonstersForTurn($state['player1']);
-
-    // Player 1 draws 2 cards for their first turn
-    for ($i = 0; $i < 2; $i++) {
-        if (count($state['player1']['deck']) > 0 && count($state['player1']['hand']) < 8) {
-            $state['player1']['hand'][] = array_pop($state['player1']['deck']);
-        }
-    }
-
-    $state['log'][] = ['msg' => 'Opponent has joined! Game Start!', 'type' => 'info-log'];
-
-    saveRoom($code, $state);
-    respond(true, 'Joined room', ['room_code' => $code, 'player_token' => $token2, 'player_num' => 2]);
+    if (!$_['ok']) respond(false, $_['msg']);
+    respond(true, 'Joined room', ['room_code' => $code, 'player_token' => $_['token2'], 'player_num' => 2]);
 }
 
-// ========== POLL STATE ==========
 function pollState($input) {
     $code = strtoupper(trim($input['room_code'] ?? ''));
     $token = $input['player_token'] ?? '';
 
     $state = loadRoom($code);
     if (!$state) respond(false, 'Room not found');
-
     $pNum = getPlayerNum($state, $token);
     if (!$pNum) respond(false, 'Invalid token');
 
-    $filtered = filterStateForPlayer($state, $pNum);
-    respond(true, '', ['state' => $filtered]);
+    respond(true, '', ['state' => filterStateForPlayer($state, $pNum)]);
 }
 
-// ========== SUBMIT MOVE ==========
+function submitMulligan($input) {
+    $code = strtoupper(trim($input['room_code'] ?? ''));
+    $token = $input['player_token'] ?? '';
+    $indices = $input['replace_indices'] ?? [];
+    if (!is_array($indices)) $indices = [];
+
+    [$state, $result] = withLockedRoom($code, function (&$state) use ($token, $indices) {
+        $pNum = getPlayerNum($state, $token);
+        if (!$pNum) return ['ok' => false, 'msg' => 'Invalid token'];
+        if ($state['status'] !== 'active') return ['ok' => false, 'msg' => 'Game not active'];
+        if (empty($state['mulligan']['phase'])) return ['ok' => false, 'msg' => 'Mulligan phase is over'];
+        if (!empty($state['mulligan']['done'][(string)$pNum])) return ['ok' => false, 'msg' => 'Mulligan already completed'];
+
+        $player = &$state['player' . $pNum];
+        $uniq = array_values(array_unique(array_map('intval', $indices)));
+        rsort($uniq);
+
+        $replaced = [];
+        foreach ($uniq as $idx) {
+            if ($idx < 0 || $idx >= count($player['hand'])) continue;
+            $replaced[] = $player['hand'][$idx];
+            array_splice($player['hand'], $idx, 1);
+        }
+
+        if (count($replaced) > 0) {
+            foreach ($replaced as $card) $player['deck'][] = $card;
+            shuffle($player['deck']);
+            drawCards($player, count($replaced));
+        }
+
+        $state['mulligan']['done'][(string)$pNum] = true;
+        $state['log'][] = ['msg' => "P{$pNum} completes mulligan (" . count($replaced) . " replaced).", 'type' => 'info-log'];
+
+        if (!empty($state['mulligan']['done']['1']) && !empty($state['mulligan']['done']['2'])) {
+            $state['mulligan']['phase'] = false;
+            $state['log'][] = ['msg' => 'Mulligans complete. P1 begins the duel.', 'type' => 'meta-log'];
+        }
+
+        $state['last_update'] = time();
+        return ['ok' => true, 'pNum' => $pNum];
+    });
+
+    if (!$result['ok']) respond(false, $result['msg']);
+    respond(true, 'Mulligan submitted', ['state' => filterStateForPlayer($state, $result['pNum'])]);
+}
+
 function submitMove($input) {
     $code = strtoupper(trim($input['room_code'] ?? ''));
     $token = $input['player_token'] ?? '';
     $move = $input['move'] ?? null;
-
     if (!$move) respond(false, 'No move provided');
 
-    $path = getRoomPath($code);
-    if (!file_exists($path)) respond(false, 'Room not found');
+    [$state, $result] = withLockedRoom($code, function (&$state) use ($token, $move) {
+        $pNum = getPlayerNum($state, $token);
+        if (!$pNum) return ['ok' => false, 'msg' => 'Invalid token'];
+        if ($state['status'] !== 'active') return ['ok' => false, 'msg' => 'Game not active'];
+        if ($state['current_turn'] !== $pNum) return ['ok' => false, 'msg' => 'Not your turn'];
+        if (!empty($state['mulligan']['phase'])) return ['ok' => false, 'msg' => 'Complete mulligan first'];
 
-    // Lock file for exclusive access during move processing
-    $fp = fopen($path, 'c+');
-    flock($fp, LOCK_EX);
-    $raw = stream_get_contents($fp);
-    $state = json_decode($raw, true);
+        $me = &$state['player' . $pNum];
+        $opp = &$state['player' . ($pNum === 1 ? 2 : 1)];
 
-    if (!$state) { flock($fp, LOCK_UN); fclose($fp); respond(false, 'Corrupt state'); }
+        $moveResult = processMove($state, $me, $opp, $pNum, $move);
+        if (empty($moveResult['ok'])) return ['ok' => false, 'msg' => $moveResult['msg'] ?? 'Move failed'];
 
-    $pNum = getPlayerNum($state, $token);
-    if (!$pNum) { flock($fp, LOCK_UN); fclose($fp); respond(false, 'Invalid token'); }
-    if ($state['status'] !== 'active') { flock($fp, LOCK_UN); fclose($fp); respond(false, 'Game not active'); }
-    if ($state['current_turn'] !== $pNum) { flock($fp, LOCK_UN); fclose($fp); respond(false, 'Not your turn'); }
+        if ($me['lp'] <= 0 || $opp['lp'] <= 0) {
+            $state['status'] = 'finished';
+            $state['winner'] = $me['lp'] > 0 ? $pNum : ($pNum === 1 ? 2 : 1);
+            $state['log'][] = ['msg' => 'Duel finished.', 'type' => 'meta-log'];
+        }
 
-    $me = &$state['player' . $pNum];
-    $opp = &$state['player' . ($pNum === 1 ? 2 : 1)];
+        $state['last_update'] = time();
+        return ['ok' => true, 'pNum' => $pNum, 'move_result' => $moveResult];
+    });
 
-    $result = processMove($state, $me, $opp, $pNum, $move);
-
-    $state['last_update'] = time();
-
-    // Check win conditions
-    if ($me['lp'] <= 0) {
-        $state['status'] = 'finished';
-        $state['winner'] = ($pNum === 1 ? 2 : 1);
-        $state['log'][] = ['msg' => 'Player ' . $pNum . ' has been defeated!', 'type' => 'battle-log'];
-    }
-    if ($opp['lp'] <= 0) {
-        $state['status'] = 'finished';
-        $state['winner'] = $pNum;
-        $state['log'][] = ['msg' => 'Player ' . ($pNum === 1 ? 2 : 1) . ' has been defeated!', 'type' => 'battle-log'];
-    }
-
-    // Write back
-    fseek($fp, 0);
-    ftruncate($fp, 0);
-    fwrite($fp, json_encode($state, JSON_UNESCAPED_UNICODE));
-    fflush($fp);
-    flock($fp, LOCK_UN);
-    fclose($fp);
-
-    $filtered = filterStateForPlayer($state, $pNum);
-    respond(true, $result['msg'] ?? 'OK', ['state' => $filtered, 'move_result' => $result]);
+    if (!$result['ok']) respond(false, $result['msg']);
+    respond(true, $result['move_result']['msg'] ?? 'OK', [
+        'state' => filterStateForPlayer($state, $result['pNum']),
+        'move_result' => $result['move_result']
+    ]);
 }
 
-// ========== MOVE PROCESSING ==========
 function processMove(&$state, &$me, &$opp, $pNum, $move) {
     $type = $move['type'] ?? '';
-
     switch ($type) {
-        case 'place_card':     return movePlaceCard($state, $me, $pNum, $move);
-        case 'summon':         return moveSummon($state, $me, $pNum, $move);
-        case 'play_spell':     return movePlaySpell($state, $me, $opp, $pNum, $move);
-        case 'attack':         return moveAttack($state, $me, $opp, $pNum, $move);
-        case 'meta':           return moveMeta($state, $me, $pNum, $move);
-        case 'end_turn':       return moveEndTurn($state, $me, $opp, $pNum);
-        default: return ['msg' => 'Unknown move type', 'ok' => false];
+        case 'place_card': return movePlaceCard($state, $me, $pNum, $move);
+        case 'summon': return moveSummon($state, $me, $pNum, $move);
+        case 'play_spell': return movePlaySpell($state, $me, $opp, $pNum, $move);
+        case 'attack': return moveAttack($state, $me, $opp, $pNum, $move);
+        case 'meta': return moveMeta($state, $me, $pNum);
+        case 'end_turn': return moveEndTurn($state, $me, $opp, $pNum);
+        default: return ['ok'=>false,'msg'=>'Unknown move type'];
     }
 }
 
 function movePlaceCard(&$state, &$me, $pNum, $move) {
-    $handIdx = $move['hand_index'] ?? -1;
-    $slotIdx = $move['slot'] ?? -1;
+    $handIdx = (int)($move['hand_index'] ?? -1);
+    $slotIdx = (int)($move['slot'] ?? -1);
 
-    if ($handIdx < 0 || $handIdx >= count($me['hand'])) return ['msg' => 'Invalid hand index', 'ok' => false];
-    if ($slotIdx < 0 || $slotIdx > 2) return ['msg' => 'Invalid slot', 'ok' => false];
+    if ($handIdx < 0 || $handIdx >= count($me['hand'])) return ['ok'=>false,'msg'=>'Invalid hand index'];
+    if ($slotIdx < 0 || $slotIdx > 2) return ['ok'=>false,'msg'=>'Invalid slot'];
 
     $card = $me['hand'][$handIdx];
-    if (!$card['isItem']) return ['msg' => 'Not an item card', 'ok' => false];
+    if (!($card['isItem'] ?? false)) return ['ok'=>false,'msg'=>'Not an item card'];
 
     $existing = $me['constructs'][$slotIdx];
-    if ($existing && $existing['constructId'] !== $card['constructId']) return ['msg' => 'Construct mismatch', 'ok' => false];
-    if ($existing && count($existing['cards']) >= 3) return ['msg' => 'Slot full', 'ok' => false];
-
-    if (!$existing) {
-        $me['constructs'][$slotIdx] = [
-            'constructId' => $card['constructId'],
-            'type' => $card['type'],
-            'cards' => [$card]
-        ];
-    } else {
-        $me['constructs'][$slotIdx]['cards'][] = $card;
-    }
+    if ($existing && $existing['constructId'] !== $card['constructId']) return ['ok'=>false,'msg'=>'Construct mismatch'];
+    if ($existing && count($existing['cards']) >= 3) return ['ok'=>false,'msg'=>'Slot full'];
 
     array_splice($me['hand'], $handIdx, 1);
-    $state['log'][] = ['msg' => "P{$pNum} placed {$card['indicator']} on construct slot.", 'type' => 'info-log'];
-    return ['msg' => 'Card placed', 'ok' => true];
+    if (!$existing) $me['constructs'][$slotIdx] = ['constructId'=>$card['constructId'],'type'=>$card['type'],'cards'=>[$card]];
+    else $me['constructs'][$slotIdx]['cards'][] = $card;
+
+    $stackCount = count($me['constructs'][$slotIdx]['cards']);
+    $state['log'][] = ['msg' => "P{$pNum} places {$card['construct']} ({$stackCount}/3).", 'type' => 'formula-log'];
+    return ['ok'=>true,'msg'=>'Card placed'];
 }
 
 function moveSummon(&$state, &$me, $pNum, $move) {
-    $predSlot = $move['pred_slot'] ?? -1;
-    $outSlot = $move['out_slot'] ?? -1;
+    if (!empty($me['summoned_this_turn'])) return ['ok'=>false,'msg'=>'You can only summon once per turn'];
 
-    if ($me['summoned_this_turn']) return ['msg' => 'Already summoned this turn', 'ok' => false];
+    $predSlot = (int)($move['pred_slot'] ?? -1);
+    $outSlot = (int)($move['out_slot'] ?? -1);
+    if ($predSlot === $outSlot) return ['ok'=>false,'msg'=>'Predictor and Outcome must be different slots'];
 
     $pred = $me['constructs'][$predSlot] ?? null;
     $out = $me['constructs'][$outSlot] ?? null;
-    if (!$pred || $pred['type'] !== 'predictor') return ['msg' => 'Invalid predictor', 'ok' => false];
-    if (!$out || $out['type'] !== 'outcome') return ['msg' => 'Invalid outcome', 'ok' => false];
+    if (!$pred || $pred['type'] !== 'predictor') return ['ok'=>false,'msg'=>'Invalid predictor'];
+    if (!$out || $out['type'] !== 'outcome') return ['ok'=>false,'msg'=>'Invalid outcome'];
 
-    $mSlot = -1;
-    for ($i = 0; $i < 3; $i++) { if ($me['monsters'][$i] === null) { $mSlot = $i; break; } }
-    if ($mSlot === -1) return ['msg' => 'No monster slot available', 'ok' => false];
+    $mSlot = array_search(null, $me['monsters'], true);
+    if ($mSlot === false) return ['ok'=>false,'msg'=>'No empty monster slot'];
 
     $tv = getTrueValidity();
     $mn = getMonsterNames();
+    $predId = $pred['constructId'];
+    $outId = $out['constructId'];
 
-    $relP = spearmanBrown(count($pred['cards']), $pred['cards'][0]['avgR']);
-    $relO = spearmanBrown(count($out['cards']), $out['cards'][0]['avgR']);
-    $rTrue = $tv[$pred['constructId']][$out['constructId']];
-    $rObs = calcObservedValidity($rTrue, $relP, $relO);
-    $atk = floor($rObs * 10000);
-    $name = $mn[$pred['constructId']][$out['constructId']];
-    $baseN = 20;
-    $power = calcPower($rObs, $baseN);
-
-    global $MONSTER_SPRITES;
-    $me['monsters'][$mSlot] = [
-        'name' => $name, 'atk' => $atk,
-        'predId' => $pred['constructId'], 'outId' => $out['constructId'],
-        'relP' => $relP, 'relO' => $relO,
-        'rTrue' => $rTrue, 'rObs' => $rObs,
-        'n' => $baseN, 'baseN' => $baseN, 'power' => $power,
-        'attacksMade' => 1, 'maxAttacks' => 1,
+    $monster = [
+        'name' => $mn[$predId][$outId] ?? "{$predId} × {$outId}",
+        'sprite' => $GLOBALS['MONSTER_SPRITES'][array_rand($GLOBALS['MONSTER_SPRITES'])],
+        'predId' => $predId,
+        'outId' => $outId,
+        'predAlpha' => spearmanBrown(count($pred['cards']), $pred['cards'][0]['avgR']),
+        'outAlpha' => spearmanBrown(count($out['cards']), $out['cards'][0]['avgR']),
+        'rTrue' => $tv[$predId][$outId] ?? 0.1,
+        'rObs' => 0,
+        'baseAtk' => 0,
+        'atk' => 0,
+        'n' => MONSTER_BASE_N,
+        'power' => 0.05,
+        'attacksMade' => 0,
+        'maxAttacks' => 1,
+        'summoningSick' => true,
         'hasReplication' => false,
-        'sprite' => $MONSTER_SPRITES[array_rand($MONSTER_SPRITES)],
-        'corrected' => false, 'isMeta' => false
+        'rangeRestricted' => false,
+        'isMeta' => false
     ];
+    refreshMonsterStats($monster);
 
+    $me['monsters'][$mSlot] = $monster;
     $me['constructs'][$predSlot] = null;
     $me['constructs'][$outSlot] = null;
     $me['summoned_this_turn'] = true;
 
-    $state['log'][] = ['msg' => "P{$pNum} summoned {$name}! ATK: {$atk}", 'type' => 'info-log'];
-    return ['msg' => "Summoned {$name}", 'ok' => true];
+    $state['log'][] = ['msg' => "P{$pNum} summons {$monster['name']} (ATK {$monster['atk']}, PWR " . floor($monster['power'] * 100) . "%).", 'type' => 'formula-log'];
+    return ['ok'=>true,'msg'=>'Summoned'];
 }
 
 function movePlaySpell(&$state, &$me, &$opp, $pNum, $move) {
-    $handIdx = $move['hand_index'] ?? -1;
-    $targetOwner = $move['target_owner'] ?? ''; // 'me' or 'opp'
-    $targetType = $move['target_type'] ?? '';    // 'monster' or 'construct'
-    $targetSlot = $move['target_slot'] ?? -1;
-
-    if ($handIdx < 0 || $handIdx >= count($me['hand'])) return ['msg' => 'Invalid hand index', 'ok' => false];
+    $handIdx = (int)($move['hand_index'] ?? -1);
+    if ($handIdx < 0 || $handIdx >= count($me['hand'])) return ['ok'=>false,'msg'=>'Invalid hand index'];
 
     $card = $me['hand'][$handIdx];
-    if ($card['isItem']) return ['msg' => 'Not a spell card', 'ok' => false];
+    if (!empty($card['isItem'])) return ['ok'=>false,'msg'=>'Not a spell/trap/resource card'];
 
-    $target = &$me;
-    if ($targetOwner === 'opp') $target = &$opp;
+    $targetOwner = ($move['target_owner'] ?? '') === 'opp' ? 'opp' : 'me';
+    $targetType = $move['target_type'] ?? '';
+    $targetSlot = (int)($move['target_slot'] ?? -1);
 
-    $spellId = $card['id'];
+    $targetPlayer = $targetOwner === 'opp' ? $opp : $me;
+    $targetArr = $targetType === 'construct' ? ($targetPlayer['constructs'] ?? []) : ($targetPlayer['monsters'] ?? []);
+    $target = $targetArr[$targetSlot] ?? null;
+    if (!$target) return ['ok'=>false,'msg'=>'No valid target there'];
 
-    switch ($spellId) {
-        case 'missing_data':
-            if ($targetType === 'construct') {
-                $c = &$target['constructs'][$targetSlot];
-                if (!$c) return ['msg' => 'No construct there', 'ok' => false];
-                array_pop($c['cards']);
-                if (count($c['cards']) === 0) $target['constructs'][$targetSlot] = null;
-                $state['log'][] = ['msg' => "P{$pNum} used Missing Data on a construct!", 'type' => 'spell-log'];
-            } else {
-                if (!$target['monsters'][$targetSlot]) return ['msg' => 'No monster there', 'ok' => false];
-                $target['monsters'][$targetSlot] = null;
-                $state['log'][] = ['msg' => "P{$pNum} used Missing Data to destroy a monster!", 'type' => 'spell-log'];
-            }
-            break;
-
-        case 'range_restrict':
-            if ($targetOwner !== 'opp' || $targetType !== 'monster') return ['msg' => 'Invalid target', 'ok' => false];
-            $m = &$opp['monsters'][$targetSlot];
-            if (!$m) return ['msg' => 'No monster', 'ok' => false];
-            $m['atk'] = floor($m['atk'] / 2);
-            $state['log'][] = ['msg' => "P{$pNum} used Range Restriction! ATK halved to {$m['atk']}.", 'type' => 'spell-log'];
-            break;
-
-        case 'correction':
-            if ($targetOwner !== 'me' || $targetType !== 'monster') return ['msg' => 'Invalid target', 'ok' => false];
-            $m = &$me['monsters'][$targetSlot];
-            if (!$m || $m['isMeta']) return ['msg' => 'Invalid target', 'ok' => false];
-            $m['atk'] = floor($m['rTrue'] * 10000);
-            $m['rObs'] = $m['rTrue'];
-            $m['corrected'] = true;
-            $m['power'] = calcPower($m['rObs'], $m['n']);
-            $state['log'][] = ['msg' => "P{$pNum} used Correction! ATK restored to {$m['atk']}.", 'type' => 'spell-log'];
-            break;
-
-        case 'sample_size':
-            if ($targetOwner !== 'me' || $targetType !== 'monster') return ['msg' => 'Invalid target', 'ok' => false];
-            $m = &$me['monsters'][$targetSlot];
-            if (!$m) return ['msg' => 'No monster', 'ok' => false];
-            $m['n'] += 100;
-            $m['power'] = calcPower($m['rObs'], $m['n']);
-            $pwr = floor($m['power'] * 100);
-            $state['log'][] = ['msg' => "P{$pNum} added Sample Size! N={$m['n']} (Power: {$pwr}%)", 'type' => 'spell-log'];
-            break;
-
-        case 'replication':
-            if ($targetOwner !== 'me' || $targetType !== 'monster') return ['msg' => 'Invalid target', 'ok' => false];
-            $m = &$me['monsters'][$targetSlot];
-            if (!$m) return ['msg' => 'No monster', 'ok' => false];
-            $m['maxAttacks'] += 1;
-            $m['hasReplication'] = true;
-            $state['log'][] = ['msg' => "P{$pNum} used Replication! Monster can attack twice.", 'type' => 'spell-log'];
-            break;
-
-        default:
-            return ['msg' => 'Unknown spell', 'ok' => false];
+    $id = $card['id'];
+    if ($id === 'sample_size') {
+        if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Sample Size must target your monster'];
+        $me['monsters'][$targetSlot]['n'] = clamp(($me['monsters'][$targetSlot]['n'] ?? MONSTER_BASE_N) + 100, MONSTER_BASE_N, 420);
+        refreshMonsterStats($me['monsters'][$targetSlot]);
+    } elseif ($id === 'replication') {
+        if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Replication must target your monster'];
+        $me['monsters'][$targetSlot]['hasReplication'] = true;
+        $me['monsters'][$targetSlot]['maxAttacks'] = max($me['monsters'][$targetSlot]['maxAttacks'], 2);
+    } elseif ($id === 'missing_data') {
+        if ($targetType === 'construct') {
+            if ($targetOwner === 'me') $me['constructs'][$targetSlot] = null;
+            else $opp['constructs'][$targetSlot] = null;
+        } else {
+            if ($targetOwner === 'me') $me['monsters'][$targetSlot] = null;
+            else $opp['monsters'][$targetSlot] = null;
+        }
+    } elseif ($id === 'range_restrict') {
+        if ($targetType !== 'monster' || $targetOwner !== 'opp') return ['ok'=>false,'msg'=>'Range Restriction must target enemy monster'];
+        $opp['monsters'][$targetSlot]['rangeRestricted'] = true;
+        refreshMonsterStats($opp['monsters'][$targetSlot]);
+    } elseif ($id === 'correction') {
+        if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Correction must target your monster'];
+        $me['monsters'][$targetSlot]['rangeRestricted'] = false;
+        refreshMonsterStats($me['monsters'][$targetSlot]);
+    } elseif ($id === 'bootstrapping') {
+        if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Bootstrapping must target your monster'];
+        $me['monsters'][$targetSlot]['n'] = clamp(($me['monsters'][$targetSlot]['n'] ?? MONSTER_BASE_N) + 60, MONSTER_BASE_N, 420);
+        refreshMonsterStats($me['monsters'][$targetSlot]);
+    } elseif ($id === 'cross_validate') {
+        if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Cross-Validation must target your monster'];
+        $me['monsters'][$targetSlot]['n'] = clamp(($me['monsters'][$targetSlot]['n'] ?? MONSTER_BASE_N) + 40, MONSTER_BASE_N, 420);
+        $me['monsters'][$targetSlot]['hasReplication'] = true;
+        $me['monsters'][$targetSlot]['maxAttacks'] = max($me['monsters'][$targetSlot]['maxAttacks'], 2);
+        refreshMonsterStats($me['monsters'][$targetSlot]);
+    } elseif ($id === 'item_analysis') {
+        if ($targetType !== 'construct' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Item Analysis must target your construct'];
+        if (count($me['constructs'][$targetSlot]['cards']) >= 3) return ['ok'=>false,'msg'=>'Construct stack already at maximum size'];
+        $last = end($me['constructs'][$targetSlot]['cards']);
+        $me['constructs'][$targetSlot]['cards'][] = $last;
+    } elseif ($id === 'ceiling_effect') {
+        if ($targetType !== 'monster' || $targetOwner !== 'opp') return ['ok'=>false,'msg'=>'Ceiling Effect must target enemy monster'];
+        $opp['monsters'][$targetSlot]['n'] = MONSTER_BASE_N;
+        refreshMonsterStats($opp['monsters'][$targetSlot]);
+    } elseif ($id === 'construct_drift') {
+        if ($targetType !== 'construct' || $targetOwner !== 'opp') return ['ok'=>false,'msg'=>'Construct Drift must target enemy construct'];
+        if (count($opp['constructs'][$targetSlot]['cards']) > 1) array_pop($opp['constructs'][$targetSlot]['cards']);
+        else $opp['constructs'][$targetSlot] = null;
+    } elseif ($id === 'criterion_contam') {
+        if ($targetType !== 'monster' || $targetOwner !== 'opp') return ['ok'=>false,'msg'=>'Criterion Contam. must target enemy monster'];
+        $opp['monsters'][$targetSlot]['n'] = clamp(($opp['monsters'][$targetSlot]['n'] ?? MONSTER_BASE_N) - 80, MONSTER_BASE_N, 420);
+        refreshMonsterStats($opp['monsters'][$targetSlot]);
+    } else {
+        return ['ok'=>false,'msg'=>'Unknown card effect'];
     }
 
     array_splice($me['hand'], $handIdx, 1);
-    return ['msg' => 'Spell played', 'ok' => true];
+    $state['log'][] = ['msg' => "P{$pNum} plays {$card['name']}.", 'type' => 'spell-log'];
+    return ['ok'=>true,'msg'=>'Spell played'];
 }
 
 function moveAttack(&$state, &$me, &$opp, $pNum, $move) {
-    $atkSlot = $move['attacker_slot'] ?? -1;
-    $defType = $move['target_type'] ?? '';  // 'monster' or 'lp'
-    $defSlot = $move['target_slot'] ?? -1;
+    $atkSlot = (int)($move['attacker_slot'] ?? -1);
+    $attacker = &$me['monsters'][$atkSlot];
+    if (!$attacker) return ['ok'=>false,'msg'=>'No attacker in that slot'];
+    if (!empty($attacker['summoningSick'])) return ['ok'=>false,'msg'=>'This monster cannot attack the turn it was summoned'];
+    if (($attacker['attacksMade'] ?? 0) >= ($attacker['maxAttacks'] ?? 1)) return ['ok'=>false,'msg'=>'This monster has no attacks left'];
 
-    $atk = &$me['monsters'][$atkSlot];
-    if (!$atk) return ['msg' => 'No attacker', 'ok' => false];
-    if ($atk['attacksMade'] >= $atk['maxAttacks']) return ['msg' => 'Monster already attacked', 'ok' => false];
-
-    // D20 roll
+    $threshold = clamp((int) round(($attacker['power'] ?? 0.05) * 20), 1, 20);
     $roll = random_int(1, 20);
-    $threshold = max(1, round($atk['power'] * 20));
     $hit = $roll <= $threshold;
 
-    $result = [
-        'ok' => true,
-        'roll' => $roll,
-        'threshold' => $threshold,
-        'hit' => $hit,
-        'attack_data' => []
-    ];
+    $result = ['ok'=>true,'roll'=>$roll,'threshold'=>$threshold,'hit'=>$hit,'attack_data'=>['damage'=>0,'outcome'=>'tie']];
+
+    $attacker['attacksMade']++;
 
     if (!$hit) {
-        // Type II Error
-        $atk['attacksMade']++;
-        if ($atk['hasReplication']) {
-            $atk['hasReplication'] = false;
-            $state['log'][] = ['msg' => "{$atk['name']} TYPE II ERROR! (Rolled {$roll}, needed ≤{$threshold}). Replication preserved N.", 'type' => 'error-log'];
-            $result['preserved_n'] = true;
-        } else {
-            $atk['n'] = $atk['baseN'];
-            $atk['power'] = calcPower($atk['rObs'], $atk['baseN']);
-            $state['log'][] = ['msg' => "{$atk['name']} TYPE II ERROR! (Rolled {$roll}, needed ≤{$threshold}). N resets to {$atk['baseN']}.", 'type' => 'error-log'];
-            $result['preserved_n'] = false;
-        }
+        $state['log'][] = ['msg' => "P{$pNum}'s {$attacker['name']} misses (roll {$roll}, needs ≤ {$threshold}).", 'type' => 'battle-log'];
+        consumeAttackSample($attacker);
         $result['msg'] = 'Type II Error! Attack missed.';
         return $result;
     }
 
-    // HIT!
-    $state['log'][] = ['msg' => "{$atk['name']} achieved significance! (Rolled {$roll} ≤ {$threshold})", 'type' => 'formula-log'];
+    $targetType = $move['target_type'] ?? 'lp';
+    $targetSlot = (int)($move['target_slot'] ?? -1);
+    if ($targetType === 'monster' && empty($opp['monsters'][$targetSlot])) $targetType = 'lp';
 
-    if ($defType === 'monster') {
-        $def = &$opp['monsters'][$defSlot];
-        if (!$def) {
-            // Direct attack if target gone
-            $defType = 'lp';
-        }
+    if ($targetType === 'lp') {
+        $dmg = $attacker['atk'];
+        $opp['lp'] = max(0, $opp['lp'] - $dmg);
+        $result['attack_data'] = ['damage'=>$dmg,'outcome'=>'win'];
+        $state['log'][] = ['msg' => "P{$pNum}'s {$attacker['name']} attacks directly for {$dmg}.", 'type' => 'battle-log'];
+        consumeAttackSample($attacker);
+        $result['msg'] = 'Attack resolved';
+        return $result;
     }
 
-    if ($defType === 'monster') {
-        $def = &$opp['monsters'][$defSlot];
-        $diff = $atk['atk'] - $def['atk'];
-        $result['attack_data'] = ['diff' => $diff, 'atk_atk' => $atk['atk'], 'def_atk' => $def['atk'], 'def_name' => $def['name']];
-
-        if ($diff > 0) {
-            $opp['monsters'][$defSlot] = null;
-            $opp['lp'] = max(0, $opp['lp'] - $diff);
-            $state['log'][] = ['msg' => "{$atk['name']} ({$atk['atk']}) destroys {$def['name']} ({$def['atk']})! {$diff} damage!", 'type' => 'battle-log'];
-            $result['attack_data']['outcome'] = 'win';
-            $result['attack_data']['damage'] = $diff;
-        } elseif ($diff < 0) {
-            $me['monsters'][$atkSlot] = null;
-            $me['lp'] = max(0, $me['lp'] - abs($diff));
-            $state['log'][] = ['msg' => "{$atk['name']} ({$atk['atk']}) destroyed by {$def['name']} ({$def['atk']})! " . abs($diff) . " damage!", 'type' => 'battle-log'];
-            $result['attack_data']['outcome'] = 'lose';
-            $result['attack_data']['damage'] = abs($diff);
-            // attacker destroyed, skip consumption
-            return $result;
-        } else {
-            $me['monsters'][$atkSlot] = null;
-            $opp['monsters'][$defSlot] = null;
-            $state['log'][] = ['msg' => "Mutual destruction! Both had {$atk['atk']} ATK.", 'type' => 'battle-log'];
-            $result['attack_data']['outcome'] = 'draw';
-            return $result;
-        }
+    $defender = &$opp['monsters'][$targetSlot];
+    if ($attacker['atk'] > $defender['atk']) {
+        $damage = $attacker['atk'] - $defender['atk'];
+        $opp['monsters'][$targetSlot] = null;
+        $opp['lp'] = max(0, $opp['lp'] - $damage);
+        $result['attack_data'] = ['damage'=>$damage,'outcome'=>'win'];
+        $state['log'][] = ['msg' => "{$attacker['name']} defeats {$defender['name']} and deals {$damage}.", 'type' => 'battle-log'];
+        consumeAttackSample($attacker);
+    } elseif ($attacker['atk'] < $defender['atk']) {
+        $damage = $defender['atk'] - $attacker['atk'];
+        $me['monsters'][$atkSlot] = null;
+        $me['lp'] = max(0, $me['lp'] - $damage);
+        $result['attack_data'] = ['damage'=>$damage,'outcome'=>'lose'];
+        $state['log'][] = ['msg' => "{$attacker['name']} loses to {$defender['name']} and takes {$damage}.", 'type' => 'battle-log'];
     } else {
-        // Direct LP attack
-        $opp['lp'] = max(0, $opp['lp'] - $atk['atk']);
-        $state['log'][] = ['msg' => "{$atk['name']} attacks directly for {$atk['atk']}!", 'type' => 'battle-log'];
-        $result['attack_data'] = ['outcome' => 'direct', 'damage' => $atk['atk']];
-    }
-
-    // Consume data (if attacker survived)
-    if ($me['monsters'][$atkSlot]) {
-        $me['monsters'][$atkSlot]['attacksMade']++;
-        if ($me['monsters'][$atkSlot]['hasReplication']) {
-            $me['monsters'][$atkSlot]['hasReplication'] = false;
-            $state['log'][] = ['msg' => "Replication preserved N={$atk['n']}.", 'type' => 'spell-log'];
-            $result['preserved_n'] = true;
-        } else {
-            $me['monsters'][$atkSlot]['n'] = $me['monsters'][$atkSlot]['baseN'];
-            $me['monsters'][$atkSlot]['power'] = calcPower($me['monsters'][$atkSlot]['rObs'], $me['monsters'][$atkSlot]['baseN']);
-            $state['log'][] = ['msg' => "Data consumed. N resets to {$me['monsters'][$atkSlot]['baseN']}.", 'type' => 'info-log'];
-            $result['preserved_n'] = false;
-        }
+        $me['monsters'][$atkSlot] = null;
+        $opp['monsters'][$targetSlot] = null;
+        $result['attack_data'] = ['damage'=>0,'outcome'=>'tie'];
+        $state['log'][] = ['msg' => "{$attacker['name']} and {$defender['name']} destroy each other.", 'type' => 'battle-log'];
     }
 
     $result['msg'] = 'Attack resolved';
     return $result;
 }
 
-function moveMeta(&$state, &$me, $pNum, $move) {
-    $monsters = &$me['monsters'];
-    if (!$monsters[0] || !$monsters[1] || !$monsters[2]) return ['msg' => 'Need 3 monsters', 'ok' => false];
+function moveMeta(&$state, &$me, $pNum) {
+    $target = getMetaTarget($me['monsters']);
+    if (!$target) return ['ok'=>false,'msg'=>'No valid meta target'];
 
-    $target = null;
-    if ($monsters[0]['predId'] === $monsters[1]['predId'] && $monsters[1]['predId'] === $monsters[2]['predId'] && $monsters[0]['predId'] !== 'META') {
-        $target = ['type' => 'pred', 'id' => $monsters[0]['predId']];
-    } elseif ($monsters[0]['outId'] === $monsters[1]['outId'] && $monsters[1]['outId'] === $monsters[2]['outId'] && $monsters[0]['outId'] !== 'META') {
-        $target = ['type' => 'out', 'id' => $monsters[0]['outId']];
-    }
-
-    if (!$target) return ['msg' => 'No valid meta target', 'ok' => false];
+    $m = $me['monsters'];
+    $meanR = (abs($m[0]['rObs']) + abs($m[1]['rObs']) + abs($m[2]['rObs'])) / 3;
+    $meanAtk = (($m[0]['atk'] ?? 0) + ($m[1]['atk'] ?? 0) + ($m[2]['atk'] ?? 0)) / 3;
 
     $constructs = getConstructs();
-    $totalN = $monsters[0]['n'] + $monsters[1]['n'] + $monsters[2]['n'];
-    $baseN = 60;
-    $startN = max($baseN, $totalN);
-    $avgRTrue = ($monsters[0]['rTrue'] + $monsters[1]['rTrue'] + $monsters[2]['rTrue']) / 3;
-    $metaAtk = floor($avgRTrue * 10000);
-    $name = "Meta-{$constructs[$target['id']]['short']} Titan";
+    $id = $target['id'];
+    $short = $constructs[$id]['short'] ?? 'META';
 
-    $metaMonster = [
-        'name' => $name, 'atk' => $metaAtk,
-        'predId' => $target['type'] === 'pred' ? $target['id'] : 'META',
-        'outId' => $target['type'] === 'out' ? $target['id'] : 'META',
-        'relP' => 1.0, 'relO' => 1.0,
-        'rTrue' => $avgRTrue, 'rObs' => $avgRTrue,
-        'n' => $startN, 'baseN' => $baseN,
-        'power' => calcPower($avgRTrue, $startN),
-        'attacksMade' => 0, 'maxAttacks' => 2,
-        'hasReplication' => true,
-        'sprite' => '🌌', 'corrected' => true, 'isMeta' => true
+    $meta = [
+        'name' => "Meta-{$short} Titan",
+        'sprite' => '🌌',
+        'predId' => $target['type'] === 'pred' ? $id : 'META',
+        'outId' => $target['type'] === 'out' ? $id : 'META',
+        'predAlpha' => 0.99,
+        'outAlpha' => 0.99,
+        'rTrue' => clamp($meanR * 1.35, 0.35, 0.95),
+        'rObs' => clamp($meanR * 1.25, 0.35, 0.9),
+        'baseAtk' => clamp((int) round($meanAtk * 1.45), 2400, 5200),
+        'atk' => 0,
+        'n' => META_BASE_N,
+        'power' => 0.97,
+        'attacksMade' => 0,
+        'maxAttacks' => 2,
+        'summoningSick' => true,
+        'hasReplication' => false,
+        'rangeRestricted' => false,
+        'isMeta' => true
     ];
+    refreshMonsterStats($meta);
 
-    $monsters[0] = null;
-    $monsters[2] = null;
-    $monsters[1] = $metaMonster;
+    $me['monsters'][0] = null;
+    $me['monsters'][2] = null;
+    $me['monsters'][1] = $meta;
 
-    $state['log'][] = ['msg' => "P{$pNum} performed META-ANALYSIS! Summoned {$name} with {$metaAtk} ATK!", 'type' => 'meta-log'];
-    return ['msg' => "Meta Analysis: {$name}", 'ok' => true, 'meta' => true];
-}
-
-function moveEndTurn(&$state, &$me, &$opp, $pNum) {
-    $nextPlayer = $pNum === 1 ? 2 : 1;
-    $state['current_turn'] = $nextPlayer;
-    $state['turn_number']++;
-
-    // Reset opponent monsters for their turn
-    resetMonstersForTurn($opp);
-    $opp['summoned_this_turn'] = false;
-
-    // Opponent draws 2 cards
-    for ($i = 0; $i < 2; $i++) {
-        if (count($opp['deck']) > 0 && count($opp['hand']) < 8) {
-            $opp['hand'][] = array_pop($opp['deck']);
-        }
-    }
-
-    $state['log'][] = ['msg' => "P{$pNum} ended their turn.", 'type' => 'info-log'];
-    return ['msg' => 'Turn ended', 'ok' => true, 'turn_ended' => true];
+    $state['log'][] = ['msg' => "P{$pNum} performs META-ANALYSIS and summons {$meta['name']}!", 'type' => 'meta-log'];
+    return ['ok'=>true,'msg'=>'Meta Analysis'];
 }
 
 function resetMonstersForTurn(&$player) {
-    for ($i = 0; $i < 3; $i++) {
-        $m = &$player['monsters'][$i];
-        if ($m) {
-            $m['attacksMade'] = 0;
-            $m['maxAttacks'] = $m['isMeta'] ? 2 : 1;
-            if ($m['isMeta']) $m['hasReplication'] = true;
-        }
+    foreach ($player['monsters'] as &$m) {
+        if (!$m) continue;
+        $m['summoningSick'] = false;
+        $m['attacksMade'] = 0;
+        $m['maxAttacks'] = !empty($m['isMeta']) ? 2 : (!empty($m['hasReplication']) ? 2 : 1);
     }
 }
 
-// ========== HELPERS ==========
-function getPlayerNum($state, $token) {
-    if ($state['player1_token'] === $token) return 1;
-    if ($state['player2_token'] === $token) return 2;
-    return null;
+function moveEndTurn(&$state, &$me, &$opp, $pNum) {
+    $state['current_turn'] = $pNum === 1 ? 2 : 1;
+    $state['turn_number']++;
+
+    $opp['summoned_this_turn'] = false;
+    resetMonstersForTurn($opp);
+    drawCards($opp, 1);
+
+    $state['log'][] = ['msg' => "P{$pNum} ends turn.", 'type' => 'info-log'];
+    return ['ok'=>true,'msg'=>'Turn ended','turn_ended'=>true];
 }
 
 function filterStateForPlayer($state, $pNum) {
@@ -672,27 +672,30 @@ function filterStateForPlayer($state, $pNum) {
     $oppKey = 'player' . $oppNum;
 
     return [
-        'room_code'    => $state['room_code'],
-        'status'       => $state['status'],
-        'is_my_turn'   => $state['current_turn'] === $pNum,
-        'my_player_num'=> $pNum,
-        'turn_number'  => $state['turn_number'],
-        'winner'       => $state['winner'],
-        'i_won'        => $state['winner'] === $pNum,
+        'room_code' => $state['room_code'],
+        'status' => $state['status'],
+        'is_my_turn' => $state['current_turn'] === $pNum,
+        'my_player_num' => $pNum,
+        'turn_number' => $state['turn_number'],
+        'winner' => $state['winner'],
+        'i_won' => $state['winner'] === $pNum,
 
-        'my_lp'        => $state[$meKey]['lp'],
-        'my_hand'      => $state[$meKey]['hand'],
-        'my_deck_count'=> count($state[$meKey]['deck']),
-        'my_constructs'=> $state[$meKey]['constructs'],
-        'my_monsters'  => $state[$meKey]['monsters'],
-        'my_summoned'  => $state[$meKey]['summoned_this_turn'],
+        'my_lp' => $state[$meKey]['lp'],
+        'my_hand' => $state[$meKey]['hand'],
+        'my_deck_count' => count($state[$meKey]['deck']),
+        'my_constructs' => $state[$meKey]['constructs'],
+        'my_monsters' => $state[$meKey]['monsters'],
+        'my_summoned' => $state[$meKey]['summoned_this_turn'],
 
-        'opp_lp'        => $state[$oppKey]['lp'],
-        'opp_hand_count'=> count($state[$oppKey]['hand']),
-        'opp_deck_count'=> count($state[$oppKey]['deck']),
-        'opp_constructs'=> $state[$oppKey]['constructs'],
-        'opp_monsters'  => $state[$oppKey]['monsters'],
+        'opp_lp' => $state[$oppKey]['lp'],
+        'opp_hand_count' => count($state[$oppKey]['hand']),
+        'opp_deck_count' => count($state[$oppKey]['deck']),
+        'opp_constructs' => $state[$oppKey]['constructs'],
+        'opp_monsters' => $state[$oppKey]['monsters'],
 
-        'log'           => $state['log']
+        'mulligan_pending' => !empty($state['mulligan']['phase']) && empty($state['mulligan']['done'][(string)$pNum]),
+        'mulligan_done' => !empty($state['mulligan']['done'][(string)$pNum]),
+
+        'log' => $state['log']
     ];
 }
