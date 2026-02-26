@@ -882,6 +882,7 @@ function buildMonster(predStack, outStack) {
         power: 0.1,
         attacksMade: 0,
         maxAttacks: 1,
+        summoningSick: true,
         hasReplication: false,
         rangeRestricted: false,
         isMeta: false
@@ -909,6 +910,7 @@ function buildMetaMonster(monsters) {
         power: 0.97,
         attacksMade: 0,
         maxAttacks: 2,
+        summoningSick: true,
         hasReplication: false,
         rangeRestricted: false,
         isMeta: true
@@ -943,7 +945,13 @@ function startTurnFor(pid) {
     const p = localGame.players[pid];
     p.summoned = false;
     drawCards(p, 1);
-    p.monsters.forEach(m => { if (m) { m.attacksMade = 0; m.maxAttacks = m.isMeta ? 2 : (m.hasReplication ? 2 : 1); } });
+    p.monsters.forEach(m => {
+        if (m) {
+            m.attacksMade = 0;
+            m.maxAttacks = m.isMeta ? 2 : (m.hasReplication ? 2 : 1);
+            m.summoningSick = false;
+        }
+    });
     logLocal(`P${pid} draws a card.`, 'info-log');
     maybeDeckOutDamage(p, pid);
 }
@@ -1127,6 +1135,7 @@ function applyLocalMove(pid, move) {
     else if (move.type === 'attack') {
         const attacker = me.monsters[move.attacker_slot];
         if (!attacker) return { success: false, message: 'No attacker in that slot' };
+        if (attacker.summoningSick) return { success: false, message: 'This monster cannot attack on the turn it was summoned' };
         if (attacker.attacksMade >= attacker.maxAttacks) return { success: false, message: 'This monster has no attacks left' };
 
         const threshold = clamp(Math.round(attacker.power * 20), 1, 20);
@@ -1311,7 +1320,7 @@ function aiUseSupport(pid) {
         if (cIdx !== -1) {
             let target = -1, score = -1;
             p.monsters.forEach((m, i) => {
-                if (!m || m.attacksMade >= m.maxAttacks) return;
+                if (!m || m.summoningSick || m.attacksMade >= m.maxAttacks) return;
                 const s = m.atk * (1 - m.power);
                 if (s > score) { score = s; target = i; }
             });
@@ -1387,7 +1396,7 @@ function aiBattlePhase(pid) {
         aiUseSupport(pid);
         let bestSlot = -1, bestScore = -Infinity;
         p.monsters.forEach((m, i) => {
-            if (!m || m.attacksMade >= m.maxAttacks) return;
+            if (!m || m.summoningSick || m.attacksMade >= m.maxAttacks) return;
             let score = m.atk * m.power + (m.hasReplication ? 220 : 0);
             if (m.attacksMade === 0) score += 30;
             if (m.power >= 0.9) score += 40;
@@ -1712,13 +1721,13 @@ function renderMonsterSlot(slotIdx, owner) {
     if (!m) return;
 
     const isMyTurn = gs.is_my_turn;
-    const canAttack = owner === 'player' && m.attacksMade < m.maxAttacks && uiPhase !== 'attack_select_target' && !uiPhase.startsWith('spell');
+    const canAttack = owner === 'player' && !m.summoningSick && m.attacksMade < m.maxAttacks && uiPhase !== 'attack_select_target' && !uiPhase.startsWith('spell');
     const div = document.createElement('div');
     div.className = 'monster-card' + (canAttack ? ' can-attack' : '');
     if (m.isMeta) div.classList.add('is-meta');
     if (attackingMonsterSlot === slotIdx && owner === 'player') div.classList.add('attacking');
 
-    if (owner === 'player' && uiPhase === 'attack_select_monster' && m.attacksMade < m.maxAttacks) {
+    if (owner === 'player' && uiPhase === 'attack_select_monster' && !m.summoningSick && m.attacksMade < m.maxAttacks) {
         div.onclick = () => selectAttackingMonster(slotIdx);
     } else if (owner === 'opp' && uiPhase === 'attack_select_target') {
         slot.classList.add('attack-target');
@@ -1727,7 +1736,9 @@ function renderMonsterSlot(slotIdx, owner) {
 
     let pwrPercent = Math.floor(m.power * 100);
     let pwrColor = pwrPercent < 50 ? '#ff5555' : (pwrPercent < 80 ? '#ffcc00' : '#50fa7b');
-    let atkCountHtml = m.maxAttacks > 1 ? `<div style="font-size:0.6cqmin; color:#aaa; text-align:center;">Atks: ${m.maxAttacks - m.attacksMade}</div>` : '';
+    let atkCountHtml = m.summoningSick
+        ? `<div style="font-size:0.55cqmin; color:#aaa; text-align:center;">Summoning Sickness</div>`
+        : (m.maxAttacks > 1 ? `<div style="font-size:0.6cqmin; color:#aaa; text-align:center;">Atks: ${m.maxAttacks - m.attacksMade}</div>` : '');
     let repHtml = m.hasReplication ? `<span style="color:var(--spell); font-size:0.6cqmin;">[REP]</span>` : '';
 
     div.innerHTML = `
@@ -1807,7 +1818,7 @@ function updateButtons() {
     const canSummon = gs.my_constructs.some(c => c?.type === 'predictor') &&
                       gs.my_constructs.some(c => c?.type === 'outcome') &&
                       !gs.my_summoned && gs.my_monsters.some(m => m === null);
-    const canAttack = gs.my_monsters.some(m => m && m.attacksMade < m.maxAttacks);
+    const canAttack = gs.my_monsters.some(m => m && !m.summoningSick && m.attacksMade < m.maxAttacks);
     const canMeta = getMetaTarget() !== null;
 
     document.getElementById('btn-summon').disabled = !(isMyTurn && canSummon && isIdle);
@@ -2088,7 +2099,7 @@ function startAttack() {
 
 function selectAttackingMonster(slotIdx) {
     const m = gs.my_monsters[slotIdx];
-    if (!m || m.attacksMade >= m.maxAttacks) return;
+    if (!m || m.summoningSick || m.attacksMade >= m.maxAttacks) return;
     attackingMonsterSlot = slotIdx;
 
     if (gs.opp_monsters.some(m => m !== null)) {
