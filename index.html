@@ -1,0 +1,2211 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Validity Wars: Power Protocol — Online</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+        --bg-dark: #0a0a1a;
+        --bg-board: #111128;
+        --predictor: #2266cc;
+        --predictor-light: #4488ee;
+        --outcome: #cc2244;
+        --outcome-light: #ee4466;
+        --spell: #22cc88;
+        --trap: #9922cc;
+        --resource: #ff9800;
+        --meta: #e040fb;
+        --gold: #ffcc00;
+        --gold-dark: #aa8800;
+        --green: #22cc66;
+        --white: #e8e8f0;
+        --gray: #555577;
+    }
+
+    body {
+        font-family: 'Press Start 2P', monospace;
+        background: #050505;
+        color: var(--white);
+        overflow: hidden;
+        height: 100vh;
+        width: 100vw;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        user-select: none;
+        touch-action: none;
+    }
+
+    #game-container {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        max-width: calc(100vh * (4/3));
+        max-height: calc(100vw * (3/4));
+        aspect-ratio: 4 / 3;
+        margin: auto;
+        background: var(--bg-dark);
+        border: 0.4cqmin solid var(--gold-dark);
+        box-shadow: 0 0 3cqmin rgba(255, 204, 0, 0.2);
+        display: flex;
+        flex-direction: column;
+        container-type: size;
+        overflow: hidden;
+    }
+
+    #game-container::after {
+        content: ''; position: absolute; inset: 0;
+        background: repeating-linear-gradient(0deg, transparent, transparent 0.2cqmin, rgba(0,0,0,0.1) 0.2cqmin, rgba(0,0,0,0.1) 0.4cqmin);
+        pointer-events: none; z-index: 9999;
+    }
+
+    /* ===== TITLE / LOBBY SCREEN ===== */
+    #title-screen {
+        position: absolute; inset: 0; background: var(--bg-dark);
+        display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000;
+    }
+    #title-screen h1 {
+        font-size: 5cqmin; color: var(--gold); text-align: center;
+        text-shadow: 0.5cqmin 0.5cqmin 0 #aa4400, 0 0 2cqmin rgba(255,200,0,0.4);
+        margin-bottom: 2cqmin; animation: titlePulse 2s ease-in-out infinite;
+    }
+    #title-screen h2 { font-size: 2cqmin; color: var(--outcome-light); margin-bottom: 3cqmin; text-align: center;}
+    @keyframes titlePulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.03); } }
+
+    .start-btn {
+        font-family: 'Press Start 2P', monospace; font-size: 2cqmin;
+        color: var(--bg-dark); background: var(--gold);
+        border: none; padding: 2cqmin 4cqmin; cursor: pointer;
+        box-shadow: 0 0.6cqmin 0 var(--gold-dark); transition: all 0.1s;
+        margin: 1cqmin;
+    }
+    .start-btn:hover { transform: translateY(0.2cqmin); box-shadow: 0 0.4cqmin 0 var(--gold-dark); }
+    .start-btn:active { transform: translateY(0.6cqmin); box-shadow: none; }
+    .start-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .how-to-btn {
+        font-family: 'Press Start 2P', monospace; font-size: 1.2cqmin; color: var(--gold);
+        background: transparent; border: 0.3cqmin solid var(--gold);
+        padding: 1cqmin 2cqmin; cursor: pointer; margin-top: 2cqmin;
+    }
+
+    .lobby-section {
+        display: flex; flex-direction: column; align-items: center; gap: 1.5cqmin;
+        margin-top: 2cqmin;
+    }
+    .lobby-row { display: flex; align-items: center; gap: 1cqmin; }
+    .lobby-input {
+        font-family: 'Press Start 2P', monospace; font-size: 1.8cqmin;
+        background: #111; color: var(--gold); border: 0.3cqmin solid var(--gold-dark);
+        padding: 1cqmin 1.5cqmin; text-align: center; width: 22cqmin;
+        letter-spacing: 0.3cqmin; text-transform: uppercase;
+    }
+    .lobby-input::placeholder { color: var(--gray); font-size: 1.2cqmin; }
+    .lobby-status {
+        font-size: 1.2cqmin; color: var(--predictor-light);
+        text-align: center; min-height: 2cqmin; animation: blink 1.5s step-end infinite;
+    }
+    .lobby-code-display {
+        font-size: 2.5cqmin; color: var(--gold); letter-spacing: 0.4cqmin;
+        background: #0d0d22; border: 0.3cqmin solid var(--gold);
+        padding: 1.5cqmin 3cqmin; cursor: pointer;
+    }
+    .lobby-code-display:hover::after { content: ' (click to copy)'; font-size: 1cqmin; color: var(--gray); }
+    .lobby-or { font-size: 1cqmin; color: var(--gray); margin: 1cqmin 0; }
+    .menu-subtitle {
+        font-size: 1.1cqmin; color: var(--gray); letter-spacing: 0.12cqmin;
+        text-align: center; margin-bottom: 0.5cqmin;
+    }
+    .difficulty-grid {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 1cqmin;
+        width: min(56cqmin, 90%);
+    }
+    .difficulty-btn {
+        font-family: 'Press Start 2P', monospace;
+        font-size: 1cqmin;
+        color: var(--gold);
+        background: #111;
+        border: 0.25cqmin solid var(--gold-dark);
+        padding: 1.2cqmin 1cqmin;
+        cursor: pointer;
+        text-align: center;
+    }
+    .difficulty-btn:hover { border-color: var(--gold); }
+    .difficulty-btn.active {
+        background: rgba(255,204,0,0.14);
+        border-color: var(--gold);
+        box-shadow: 0 0 0.8cqmin rgba(255,204,0,0.35);
+    }
+    #ai-difficulty-desc {
+        min-height: 3.6cqmin;
+        line-height: 1.4;
+        max-width: 62cqmin;
+        animation: none;
+        color: var(--white);
+    }
+
+    /* ===== TUTORIAL MODAL ===== */
+    .modal-overlay {
+        position: absolute; inset: 0; background: rgba(0,0,0,0.9);
+        display: none; align-items: center; justify-content: center;
+        z-index: 2000; padding: 4cqmin;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-box {
+        background: #1a1a3a; border: 0.4cqmin solid var(--gold); padding: 3cqmin;
+        max-width: 90%; max-height: 90%; overflow-y: auto; line-height: 1.8; font-size: 1.5cqmin;
+    }
+    .modal-box h2 { color: var(--gold); font-size: 2.5cqmin; margin-bottom: 2cqmin; }
+    .modal-box h3 { color: var(--predictor-light); font-size: 1.8cqmin; margin: 2cqmin 0 1cqmin; }
+
+    /* ===== GAME SCREEN ===== */
+    #game-screen { display: none; height: 100%; flex-direction: column; width: 100%;}
+    #game-screen.active { display: flex; }
+
+    .top-bar {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 0 2cqmin; background: #0d0d22; border-bottom: 0.3cqmin solid var(--gray);
+        height: 8%; width: 100%; flex-shrink: 0;
+    }
+    .lp-display { display: flex; align-items: center; gap: 1cqmin; font-size: 1.5cqmin; }
+    .lp-bar { width: 15cqmin; height: 1.5cqmin; background: #222; border: 0.2cqmin solid var(--gray); position: relative; }
+    .lp-fill { height: 100%; background: var(--green); transition: width 0.5s; }
+    .lp-label { font-size: 1.2cqmin; color: var(--gray); }
+    .lp-value { font-size: 1.5cqmin; color: var(--gold); min-width: 6cqmin; text-align: right; }
+    .turn-indicator { font-size: 1.2cqmin; color: var(--gold); padding: 0.8cqmin 1.5cqmin; border: 0.2cqmin solid var(--gold); animation: blink 1.5s step-end infinite; }
+
+    .game-board {
+        height: 62%; width: 100%; flex-shrink: 0;
+        display: flex; flex-direction: column;
+        padding: 0.5cqmin 2cqmin; gap: 0.2cqmin;
+    }
+    .field-row { display: flex; gap: 0.8cqmin; justify-content: center; align-items: center; flex: 1; min-height: 0;}
+    .field-label { font-size: 0.8cqmin; color: var(--gray); writing-mode: vertical-rl; padding: 0 0.5cqmin; }
+    .field-divider { height: 0.2cqmin; width: 100%; background: linear-gradient(90deg, transparent, var(--gray), transparent); margin: 0.2cqmin 0; flex-shrink: 0;}
+
+    .card-slot {
+        width: 7.5cqmin; height: 10cqmin; border: 0.2cqmin dashed rgba(255,255,255,0.15);
+        display: flex; align-items: center; justify-content: center; position: relative;
+    }
+    .card {
+        width: 7.5cqmin; height: 10cqmin; border: 0.2cqmin solid; padding: 0.4cqmin;
+        display: flex; flex-direction: column; cursor: pointer; position: relative;
+        transition: transform 0.1s; background: #1a1a2e; flex-shrink: 0;
+    }
+    .monster-card {
+        width: 7.5cqmin; height: 10cqmin; border: 0.2cqmin solid var(--gold); padding: 0.4cqmin;
+        background: linear-gradient(135deg, #1a1a3a, #2a1a3a);
+        display: flex; flex-direction: column; position: relative; cursor: pointer;
+        box-shadow: 0 0 1cqmin rgba(255,204,0,0.2); flex-shrink: 0;
+    }
+    .monster-card.is-meta {
+        border: 0.3cqmin solid var(--meta);
+        box-shadow: 0 0 2cqmin var(--meta);
+        background: linear-gradient(135deg, #2a002a, #4a004a);
+    }
+
+    .opponent-side .card-slot, .opponent-side .card, .opponent-side .monster-card { width: 6cqmin; height: 8cqmin; }
+    .opponent-side .card-type-badge { font-size: 0.4cqmin; }
+    .opponent-side .card-construct { font-size: 0.6cqmin; }
+    .opponent-side .card-indicator { font-size: 0.5cqmin; }
+    .opponent-side .monster-sprite { font-size: 2cqmin; }
+    .opponent-side .monster-stats-bar { font-size: 0.6cqmin; }
+    .opponent-side .monster-reliability { font-size: 0.5cqmin; }
+
+    .card:hover { transform: translateY(-0.5cqmin); z-index: 10; }
+    .card.selected { transform: translateY(-1cqmin); box-shadow: 0 0 1.5cqmin var(--gold); border-color: var(--gold) !important; }
+    .card.predictor { border-color: var(--predictor); }
+    .card.outcome { border-color: var(--outcome); }
+    .card.spell { border-color: var(--spell); background: #0a1f14; }
+    .card.trap { border-color: var(--trap); background: #1a0a1f; }
+    .card.resource { border-color: var(--resource); background: #331a00; }
+
+    .card-type-badge { font-size: 0.6cqmin; padding: 0.2cqmin; color: #fff; text-align: center; margin-bottom: 0.2cqmin; }
+    .card.predictor .card-type-badge { background: var(--predictor); }
+    .card.outcome .card-type-badge { background: var(--outcome); }
+    .card.spell .card-type-badge { background: var(--spell); }
+    .card.trap .card-type-badge { background: var(--trap); }
+    .card.resource .card-type-badge { background: var(--resource); }
+
+    .card-construct { font-size: 0.8cqmin; color: var(--gold); text-align: center; margin-bottom: 0.2cqmin; line-height: 1.2; }
+    .card-indicator { font-size: 0.7cqmin; color: var(--white); text-align: center; flex: 1; display: flex; align-items: center; justify-content: center; }
+    .card-stats { display: flex; justify-content: space-between; font-size: 0.6cqmin; border-top: 0.1cqmin solid rgba(255,255,255,0.15); padding-top: 0.2cqmin; }
+
+    .monster-name { font-size: 0.6cqmin; color: var(--gold); text-align: center; margin-bottom: 0.2cqmin; line-height: 1.2; }
+    .monster-sprite { flex: 1; display: flex; align-items: center; justify-content: center; font-size: 2.8cqmin; }
+    .monster-stats-bar {
+        display: flex; justify-content: space-between;
+        font-size: 0.8cqmin; border-top: 0.1cqmin solid var(--gold-dark);
+        padding-top: 0.2cqmin; color: #ff6644;
+    }
+    .monster-reliability { font-size: 0.6cqmin; text-align: center; color: var(--predictor-light); margin-top: 0.2cqmin; }
+
+    .stack-count {
+        position: absolute; top: -0.5cqmin; right: -0.5cqmin;
+        background: var(--gold); color: var(--bg-dark); font-size: 1cqmin;
+        width: 2cqmin; height: 2cqmin; display: flex; align-items: center; justify-content: center;
+        border: 0.1cqmin solid var(--gold-dark); z-index: 5;
+    }
+
+    .action-bar {
+        height: 8%; width: 100%; flex-shrink: 0;
+        display: flex; gap: 1cqmin; padding: 0 2cqmin;
+        background: #0d0d22; border-top: 0.1cqmin solid rgba(255,255,255,0.1);
+        justify-content: center; align-items: center;
+    }
+    .action-btn {
+        font-family: 'Press Start 2P', monospace; font-size: 1.2cqmin; padding: 1cqmin 2cqmin;
+        border: 0.2cqmin solid; background: transparent; cursor: pointer; color: var(--white);
+        border-color: var(--gray); transition: all 0.1s;
+    }
+    .action-btn:hover:not(:disabled) { transform: translateY(-0.2cqmin); background: rgba(255,255,255,0.1);}
+    .action-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .action-btn.summon { border-color: var(--gold); color: var(--gold); }
+    .action-btn.attack { border-color: var(--outcome-light); color: var(--outcome-light); }
+    .action-btn.meta { border-color: var(--meta); color: var(--meta); }
+    .action-btn.end-turn { border-color: var(--predictor-light); color: var(--predictor-light); }
+    .action-btn.cancel { border-color: var(--gray); color: var(--gray); display: none; }
+
+    .hand-area {
+        height: 22%; width: 100%; flex-shrink: 0;
+        background: #0d0d22; border-top: 0.2cqmin solid var(--gray);
+        padding: 0.5cqmin 2cqmin; display: flex; flex-direction: column;
+    }
+    .hand-label { font-size: 1cqmin; color: var(--gray); margin-bottom: 0.5cqmin; display: flex; justify-content: space-between; flex-shrink: 0;}
+    .hand-cards { display: flex; gap: 1cqmin; overflow-x: auto; overflow-y: hidden; flex: 1; align-items: center; padding-bottom: 0.5cqmin;}
+
+    .card-slot.highlight { border-color: var(--gold); background: rgba(255,204,0,0.08); animation: slotPulse 0.8s ease-in-out infinite; }
+    .card-slot.attack-target { border-color: var(--outcome-light); background: rgba(204,34,68,0.15); cursor: pointer; }
+    .card-slot.spell-target { border-color: var(--spell); background: rgba(34,204,136,0.15); animation: slotPulse 0.8s ease-in-out infinite; cursor: pointer; }
+    .card-slot.resource-target { border-color: var(--resource); background: rgba(255,152,0,0.15); animation: slotPulse 0.8s ease-in-out infinite; cursor: pointer; }
+    .monster-card.can-attack { animation: monsterReady 1s ease-in-out infinite; }
+    .monster-card.attacking { box-shadow: 0 0 2cqmin var(--outcome-light); border-color: var(--outcome-light); }
+
+    #flash-overlay { position: absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index: 9; }
+    .flash-attack { animation: fAtk 0.2s ease-out; }
+    .flash-error { animation: fErr 0.6s ease-out; }
+    .flash-heal { animation: fHeal 0.4s ease-out; }
+    .flash-meta { animation: fMeta 0.8s ease-out; }
+
+    @keyframes fAtk { 0% { background-color: rgba(255,255,255,0.8); } 100% { background-color: transparent; } }
+    @keyframes fErr { 0% { background-color: rgba(255,0,0,0.8); } 100% { background-color: transparent; } }
+    @keyframes fHeal { 0% { background-color: rgba(0,255,0,0.6); } 100% { background-color: transparent; } }
+    @keyframes fMeta { 0% { background-color: rgba(224,64,251,0.8); } 100% { background-color: transparent; } }
+    @keyframes blink { 50% { opacity: 0.4; } }
+    @keyframes slotPulse { 0%, 100% { box-shadow: inset 0 0 0.5cqmin rgba(255,204,0,0.1); } 50% { box-shadow: inset 0 0 1.5cqmin rgba(255,204,0,0.3); } }
+    @keyframes shake { 0%, 100% { transform: translate(0,0); } 20% { transform: translate(-1cqmin,0.5cqmin); } 40% { transform: translate(1cqmin,-0.5cqmin); } 60% { transform: translate(-1cqmin,-0.5cqmin); } 80% { transform: translate(1cqmin,0.5cqmin); } }
+    .shake-anim { animation: shake 0.4s ease-in-out; }
+
+    .game-log {
+        position: absolute; bottom: 24%; right: 2%; width: 25%; max-height: 15%;
+        overflow-y: auto; background: rgba(10,10,26,0.92); border: 0.2cqmin solid var(--gray); padding: 1cqmin;
+        font-size: 0.9cqmin; line-height: 1.4; z-index: 50;
+    }
+    .log-entry { margin-bottom: 0.5cqmin; padding-bottom: 0.5cqmin; border-bottom: 0.1cqmin solid rgba(255,255,255,0.05); }
+    .log-entry.formula-log { color: var(--gold); }
+    .log-entry.battle-log { color: var(--outcome-light); }
+    .log-entry.info-log { color: var(--predictor-light); }
+    .log-entry.spell-log { color: var(--spell); }
+    .log-entry.error-log { color: var(--outcome); }
+    .log-entry.meta-log { color: var(--meta); font-weight: bold; }
+
+    .damage-number {
+        position: fixed; font-family: 'Press Start 2P', monospace; font-size: 3vmin; color: #ff4444;
+        text-shadow: 0.3vmin 0.3vmin 0 #000; z-index: 9000; pointer-events: none; animation: floatUp 1.5s ease-out forwards;
+    }
+    @keyframes floatUp { 0% { opacity: 1; transform: translateY(0) scale(1); } 100% { opacity: 0; transform: translateY(-8vmin) scale(1.5); } }
+
+    .opponent-side { transform: scale(0.85); transform-origin: top center; opacity: 0.9; }
+    .field-divider { height: 0.3cqmin; width: 100%; background: linear-gradient(90deg, transparent, var(--gray), transparent); margin: 0.5cqmin 0; flex-shrink: 0;}
+
+    .tooltip {
+        display: none; position: fixed; background: #1a1a3a; border: 0.3vmin solid var(--gold); padding: 1.5vmin;
+        font-size: 1.2vmin; line-height: 1.8; z-index: 5000; width: auto; max-width: 45vmin; pointer-events: none;
+    }
+    .tooltip.active { display: block; }
+    .card-back { width: 4.5cqmin; height: 6cqmin; background: repeating-linear-gradient(45deg, #1a1a3a, #1a1a3a 0.5cqmin, #222244 0.5cqmin, #222244 1cqmin); border: 0.2cqmin solid var(--gray); flex-shrink: 0;}
+
+    .end-screen {
+        position: absolute; inset: 0; background: rgba(0,0,0,0.95);
+        display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 3000; text-align: center;
+    }
+    .end-screen.active { display: flex; }
+    .end-screen h1 { font-size: 6cqmin; margin-bottom: 2cqmin; }
+    .end-screen p { font-size: 2cqmin; color: var(--gray); margin-bottom: 4cqmin; max-width: 60cqmin; line-height: 1.8; }
+
+    .lp-target { border: 0.3cqmin solid var(--outcome-light) !important; animation: slotPulse 0.6s ease-in-out infinite; cursor: pointer; }
+
+    #dice-modal {
+        position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        background: #111; border: 0.4cqmin solid var(--gold); padding: 3cqmin;
+        text-align: center; z-index: 4000; display: none;
+        box-shadow: 0 0 5cqmin rgba(0,0,0,0.8);
+    }
+    #dice-result { font-size: 6cqmin; color: #fff; margin: 2cqmin 0; animation: pulse 0.1s infinite; }
+    #dice-text { font-size: 1.5cqmin; color: var(--predictor-light); }
+    @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
+
+    @keyframes monsterReady { 0%, 100% { box-shadow: 0 0 1cqmin rgba(255,204,0,0.2); } 50% { box-shadow: 0 0 2cqmin rgba(255,204,0,0.5); } }
+</style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="flash-overlay"></div>
+
+    <div id="dice-modal">
+        <div style="color:var(--gold); font-size: 2cqmin;">ROLLING D20...</div>
+        <div id="dice-result">--</div>
+        <div id="dice-text">Target: ≤ X to achieve P < .05</div>
+    </div>
+
+    <!-- ===== TITLE / LOBBY ===== -->
+    <div id="title-screen">
+        <h1>VALIDITY WARS</h1>
+        <h2>POWER PROTOCOL — MODE SELECTOR</h2>
+
+        <div id="main-menu" class="lobby-section">
+            <button class="start-btn" onclick="showMenu('online')">ONLINE MULTIPLAYER</button>
+            <button class="start-btn" onclick="showMenu('single')">SINGLE PLAYER</button>
+            <button class="how-to-btn" onclick="showTutorial()">HOW TO PLAY</button>
+        </div>
+
+        <div id="lobby-menu" class="lobby-section" style="display:none;">
+            <div class="menu-subtitle">ONLINE MODE SELECTOR</div>
+            <button class="start-btn" onclick="createRoom()">CREATE ROOM</button>
+            <div class="lobby-or">— OR —</div>
+            <div class="lobby-row">
+                <input type="text" class="lobby-input" id="join-code-input" maxlength="10" placeholder="ROOM CODE" autocomplete="off">
+                <button class="start-btn" style="font-size:1.5cqmin; padding:1.5cqmin 2cqmin;" onclick="joinRoom()">JOIN</button>
+            </div>
+            <div class="lobby-row" style="margin-top:0.5cqmin;">
+                <button class="how-to-btn" onclick="showMenu('main')" style="margin-top:0;">BACK</button>
+                <button class="how-to-btn" onclick="showTutorial()" style="margin-top:0;">HOW TO PLAY</button>
+            </div>
+        </div>
+
+        <div id="single-menu" class="lobby-section" style="display:none;">
+            <div class="menu-subtitle">SINGLE PLAYER MODE SELECTOR</div>
+            <div class="menu-subtitle" style="color:var(--predictor-light);">CHOOSE AI DIFFICULTY</div>
+            <div class="difficulty-grid" id="difficulty-grid">
+                <button class="difficulty-btn" data-difficulty="rookie" onclick="selectAIDifficulty('rookie')">ROOKIE</button>
+                <button class="difficulty-btn" data-difficulty="balanced" onclick="selectAIDifficulty('balanced')">BALANCED</button>
+                <button class="difficulty-btn" data-difficulty="strong" onclick="selectAIDifficulty('strong')">STRONG</button>
+                <button class="difficulty-btn" data-difficulty="expert" onclick="selectAIDifficulty('expert')">EXPERT</button>
+            </div>
+            <div class="lobby-status" id="ai-difficulty-desc"></div>
+            <button class="start-btn" style="font-size:1.5cqmin; padding:1.5cqmin 2.5cqmin;" onclick="startSinglePlayer()">START SINGLE PLAYER</button>
+            <div class="lobby-row" style="margin-top:0.5cqmin;">
+                <button class="how-to-btn" onclick="showMenu('main')" style="margin-top:0;">BACK</button>
+                <button class="how-to-btn" onclick="showTutorial()" style="margin-top:0;">HOW TO PLAY</button>
+            </div>
+        </div>
+
+        <div id="lobby-waiting" class="lobby-section" style="display:none;">
+            <div style="font-size:1.5cqmin; color:var(--white); margin-bottom:1cqmin;">ROOM CODE:</div>
+            <div class="lobby-code-display" id="room-code-display" onclick="copyRoomCode()"></div>
+            <div class="lobby-status" id="lobby-status">Waiting for opponent...</div>
+            <button class="how-to-btn" onclick="showTutorial()">HOW TO PLAY</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="tutorial-modal">
+        <div class="modal-box">
+            <h2>HOW TO PLAY</h2>
+
+            <h3>1. Objective (What “Winning” Means)</h3>
+            <p>Your goal is to reduce your opponent’s LP (Life Points) from <strong>8000 to 0</strong>. You do this by summoning monsters from <em>Predictor × Outcome</em> construct pairings and attacking.</p>
+            <p>Think like a psychometrician: stronger measurement quality (reliability) and larger samples (N) help you estimate effects more accurately and make successful attacks more likely.</p>
+
+            <h3>2. Card Types (What Each Color Does)</h3>
+            <p>
+            <span style="color:var(--predictor-light)">BLUE = Predictor items</span> (e.g., Cognitive Ability)<br>
+            <span style="color:var(--outcome-light)">RED = Outcome items</span> (e.g., Job Performance)<br>
+            <span style="color:var(--resource)">ORANGE = Resource cards</span> (increase sample size / N)<br>
+            <span style="color:var(--spell)">GREEN = Spells</span> (special effects)<br>
+            <span style="color:var(--trap)">PURPLE = Traps / debuffs</span> (weaken enemies)
+            </p>
+            <p>Hover cards and monsters to inspect details such as average inter-item correlation (r̄), reliability (α), observed validity, true validity (ρ), sample size, and power.</p>
+
+            <h3>3. Construct Phase (Placing & Stacking Items)</h3>
+            <p>Click a card in your hand, then click a construct slot to place it.</p>
+            <p><strong>Stacking rule:</strong> you may stack up to <strong>3 identical construct items</strong> in the same slot (same construct only). Example: stack multiple Cognitive Ability items together.</p>
+            <p>Stacking increases construct reliability (α) via the Spearman-Brown principle. In plain language: <strong>more good items = more reliable measurement</strong>.</p>
+            <p>Higher reliability improves the monster you summon from that construct later (better observed validity and more effective attacks).</p>
+
+            <h3>4. Summoning Phase (Making a Monster)</h3>
+            <p>To summon, you must control at least one <span style="color:var(--predictor-light)">Predictor</span> construct and one <span style="color:var(--outcome-light)">Outcome</span> construct.</p>
+            <p>Press <strong>SUMMON</strong>, then select:</p>
+            <p>
+            • one Predictor construct slot<br>
+            • one Outcome construct slot
+            </p>
+            <p>The game combines them into a monster. The monster’s combat stats reflect the quality of your measurement model:</p>
+            <p>
+            • <strong>True validity (ρ)</strong> = underlying relationship between predictor and outcome<br>
+            • <strong>Observed validity</strong> is attenuated by measurement error (reliability matters)<br>
+            • <strong>ATK</strong> is derived from the resulting effect strength
+            </p>
+            <p><strong>Important:</strong> you can normally summon only <strong>once per turn</strong>.</p>
+
+            <h3>5. Battle Phase (Power, D20, and Significance)</h3>
+            <p>Press <strong>BATTLE</strong>, select one of your monsters, then choose a target (enemy monster, or direct LP attack if no enemy monsters are on the field).</p>
+            <p>Each attack requires a <strong>D20 significance roll</strong>. Your monster must achieve <strong>P &lt; .05</strong> to land the attack.</p>
+            <p>Your success chance is your <strong>statistical power (1 − β)</strong>. The higher the power, the easier the D20 threshold.</p>
+            <p>Example: if Power = 80%, you must roll <strong>16 or lower</strong> on a D20. If you roll above the threshold, the attack fails (a <span style="color:var(--outcome)">Type II Error</span>).</p>
+
+            <h3>6. Sample Size (N) and Why Your Attack “Uses Data”</h3>
+            <p>Monsters start with a small pilot sample (low N), which usually means low power.</p>
+            <p>Use <span style="color:var(--resource)">Sample Size</span> cards on your monster to increase N and improve power before attacking.</p>
+            <p><strong>Critical rule:</strong> an attack consumes the sample. After attacking, N usually resets to baseline (your data were “spent”), whether the attack hit or missed.</p>
+            <p>This creates a real tradeoff: invest in power before high-value attacks, rather than attacking immediately with weak evidence.</p>
+
+            <h3>7. Spells, Traps, and Timing Tips</h3>
+            <p>
+            • <span style="color:var(--spell)">Missing Data</span>: destroy any card on the field (monster or construct). Great for disrupting stacked constructs or removing a dangerous monster.<br>
+            • <span style="color:var(--spell)">Replication</span>: target your monster; grants an extra attack and preserves N for an additional strike window.<br>
+            • <span style="color:var(--trap)">Range Restriction</span>: target enemy monster; halves its ATK (attenuation in action).<br>
+            • <span style="color:var(--gold)">Correction</span>: target your monster; restores ATK to its maximum (undoes prior attenuation penalties).
+            </p>
+
+            <h3>8. META Phase (Meta-Analysis Ultimate Summon)</h3>
+            <p>If you control <strong>3 monsters</strong> and they share the <strong>exact same Predictor</strong> <em>or</em> the <strong>exact same Outcome</strong>, press <strong>META</strong>.</p>
+            <p>The 3 monsters are sacrificed to summon a <strong>Meta-Analytic Titan</strong> with very high power and strong stats. This is your big “evidence aggregation” play.</p>
+
+            <h3>9. Turn Flow (Beginner-Friendly Checklist)</h3>
+            <p>
+            1) Place/stack construct items to increase reliability<br>
+            2) Summon a monster (Predictor + Outcome)<br>
+            3) Use Sample Size / Spells / Traps to prepare the board<br>
+            4) Enter Battle and attack with sufficient power<br>
+            5) End turn
+            </p>
+            <p><strong>Beginner tip:</strong> Don’t rush attacks. A more reliable construct stack + larger N usually produces better outcomes than a fast low-power attack.</p>
+<button class="how-to-btn" style="display:block; margin: 2cqmin auto 0;" onclick="closeTutorial()">I UNDERSTAND</button>
+        </div>
+    </div>
+
+    <!-- ===== GAME SCREEN ===== -->
+    <div id="game-screen">
+        <div class="top-bar">
+            <div class="lp-display">
+                <span class="lp-label">OPP LP</span>
+                <div class="lp-bar"><div class="lp-fill" id="opp-lp-bar" style="width:100%"></div></div>
+                <span class="lp-value" id="opp-lp">8000</span>
+            </div>
+            <div class="turn-indicator" id="turn-indicator">WAITING</div>
+            <div class="lp-display">
+                <span class="lp-value" id="player-lp">8000</span>
+                <div class="lp-bar"><div class="lp-fill" id="player-lp-bar" style="width:100%"></div></div>
+                <span class="lp-label">YOUR LP</span>
+            </div>
+        </div>
+
+        <div class="game-board">
+            <div class="opponent-side">
+                <div class="field-row" id="opp-hand-row" style="justify-content:center; gap: 0.5cqmin; margin-bottom: 0.5cqmin; height: 6cqmin;"></div>
+                <div class="field-row">
+                    <span class="field-label" style="color:var(--outcome-light)">MONSTERS</span>
+                    <div class="card-slot" id="opp-monster-0"></div>
+                    <div class="card-slot" id="opp-monster-1"></div>
+                    <div class="card-slot" id="opp-monster-2"></div>
+                </div>
+                <div class="field-row">
+                    <span class="field-label">CONSTRUCTS</span>
+                    <div class="card-slot" id="opp-construct-0"></div>
+                    <div class="card-slot" id="opp-construct-1"></div>
+                    <div class="card-slot" id="opp-construct-2"></div>
+                </div>
+            </div>
+            <div class="field-divider"></div>
+            <div>
+                <div class="field-row">
+                    <span class="field-label">CONSTRUCTS</span>
+                    <div class="card-slot" id="player-construct-0" onclick="onConstructSlotClick(0)"></div>
+                    <div class="card-slot" id="player-construct-1" onclick="onConstructSlotClick(1)"></div>
+                    <div class="card-slot" id="player-construct-2" onclick="onConstructSlotClick(2)"></div>
+                </div>
+                <div class="field-row">
+                    <span class="field-label" style="color:var(--gold)">MONSTERS</span>
+                    <div class="card-slot" id="player-monster-0" onclick="onMonsterSlotClick(0)"></div>
+                    <div class="card-slot" id="player-monster-1" onclick="onMonsterSlotClick(1)"></div>
+                    <div class="card-slot" id="player-monster-2" onclick="onMonsterSlotClick(2)"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="action-bar" id="action-bar">
+            <button class="action-btn summon" id="btn-summon" onclick="startSummon()" disabled>SUMMON</button>
+            <button class="action-btn meta" id="btn-meta" onclick="doMeta()" disabled>META</button>
+            <button class="action-btn attack" id="btn-attack" onclick="startAttack()" disabled>BATTLE</button>
+            <button class="action-btn cancel" id="btn-cancel" onclick="cancelAction()">CANCEL</button>
+            <button class="action-btn end-turn" id="btn-end" onclick="doEndTurn()" disabled>END TURN</button>
+        </div>
+
+        <div class="hand-area">
+            <div class="hand-label">
+                <span>YOUR HAND</span>
+                <span id="deck-count" style="color:var(--gray)">DECK: 0</span>
+            </div>
+            <div class="hand-cards" id="player-hand"></div>
+        </div>
+    </div>
+
+    <div class="end-screen" id="end-screen">
+        <h1 id="end-title"></h1>
+        <p id="end-message"></p>
+        <button class="start-btn" onclick="location.reload()">PLAY AGAIN</button>
+    </div>
+
+    <div class="game-log" id="game-log"></div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+// ==================== CONFIG ====================
+const API_URL = 'api.php'; // Change to your API endpoint
+
+// ==================== PSYCHOMETRICS DATA (for tooltips) ====================
+const CONSTRUCTS = {
+    cog_ability: { name: "Cognitive Ability", type: "predictor", short: "COG", avgR: 0.65 },
+    conscient: { name: "Conscientiousness", type: "predictor", short: "CON", avgR: 0.45 },
+    struct_int: { name: "Struct. Interview", type: "predictor", short: "INT", avgR: 0.55 },
+    work_sample: { name: "Work Sample", type: "predictor", short: "WST", avgR: 0.50 },
+    job_perf: { name: "Job Performance", type: "outcome", short: "PERF", avgR: 0.52 },
+    turnover: { name: "Turnover", type: "outcome", short: "TURN", avgR: 0.40 },
+    job_sat: { name: "Job Satisfaction", type: "outcome", short: "SAT", avgR: 0.48 },
+    ocb: { name: "OCB", type: "outcome", short: "OCB", avgR: 0.44 }
+};
+
+const TRUE_VALIDITY = {
+    cog_ability: { job_perf: 0.51, turnover: 0.20, job_sat: 0.15, ocb: 0.12 },
+    conscient:   { job_perf: 0.31, turnover: 0.26, job_sat: 0.25, ocb: 0.30 },
+    struct_int:  { job_perf: 0.51, turnover: 0.22, job_sat: 0.18, ocb: 0.15 },
+    work_sample: { job_perf: 0.54, turnover: 0.15, job_sat: 0.12, ocb: 0.10 }
+};
+
+const MONSTER_NAMES = {
+    cog_ability: {
+        job_perf: "Sapient Performer",
+        turnover: "Logic Guardian",
+        job_sat: "Mind's Content",
+        ocb: "Brilliant Helper"
+    },
+    conscient: {
+        job_perf: "Diligent Titan",
+        turnover: "Steadfast Anchor",
+        job_sat: "Dutiful Spirit",
+        ocb: "Noble Worker"
+    },
+    struct_int: {
+        job_perf: "Interview Sage",
+        turnover: "Vetting Sentinel",
+        job_sat: "Rapport Weaver",
+        ocb: "Dialogue Knight"
+    },
+    work_sample: {
+        job_perf: "Craft Master",
+        turnover: "Task Binder",
+        job_sat: "Skilled Spirit",
+        ocb: "Practice Hero"
+    }
+};
+
+const MONSTER_SPRITES = ['⚔️','🐉','🦁','🔥','💎','🌟','🗡️','🛡️','👁️','🌀'];
+
+function spearmanBrown(k, avgR) { return (k * avgR) / (1 + (k - 1) * avgR); }
+
+// ==================== LOCAL SINGLE-PLAYER ENGINE ====================
+const AI_DIFFICULTY_PROFILES = {
+    rookie: {
+        label: 'Rookie',
+        description: 'Forgiving AI: simpler sequencing, fewer optimizations, weaker target selection.',
+        maxPlacementLoops: 8, placeNoise: 10, supportLoopCap: 10,
+        rangeRestrictThreshold: 1600, missingDataThreatThreshold: 2300, missingDataConstructStackMin: 3,
+        replicationThreshold: 1200, samplePowerTarget: 0.78, sampleNTarget: 80,
+        metaMinAtk: 3200, metaUpgradeRatio: 1.05,
+        attackWinBonus: 850, attackTieBonus: 120, attackLosePenalty: 520,
+        attackerSelfRiskWeight: 0.35, defenderValueWeight: 0.22,
+        randomTargetChance: 0.28, battleGuard: 6, delayMs: 500
+    },
+    balanced: {
+        label: 'Balanced',
+        description: 'Solid AI: sensible stacking, support timing, and target priorities without perfect play.',
+        maxPlacementLoops: 14, placeNoise: 5, supportLoopCap: 16,
+        rangeRestrictThreshold: 1300, missingDataThreatThreshold: 1900, missingDataConstructStackMin: 2,
+        replicationThreshold: 950, samplePowerTarget: 0.86, sampleNTarget: 120,
+        metaMinAtk: 2800, metaUpgradeRatio: 0.85,
+        attackWinBonus: 1000, attackTieBonus: 220, attackLosePenalty: 360,
+        attackerSelfRiskWeight: 0.22, defenderValueWeight: 0.32,
+        randomTargetChance: 0.08, battleGuard: 9, delayMs: 350
+    },
+    strong: {
+        label: 'Strong',
+        description: 'Optimized AI: builds reliability stacks, powers attacks, and punishes threats.',
+        maxPlacementLoops: 20, placeNoise: 1, supportLoopCap: 22,
+        rangeRestrictThreshold: 1150, missingDataThreatThreshold: 1750, missingDataConstructStackMin: 2,
+        replicationThreshold: 850, samplePowerTarget: 0.90, sampleNTarget: 140,
+        metaMinAtk: 2550, metaUpgradeRatio: 0.75,
+        attackWinBonus: 1080, attackTieBonus: 260, attackLosePenalty: 250,
+        attackerSelfRiskWeight: 0.18, defenderValueWeight: 0.38,
+        randomTargetChance: 0.0, battleGuard: 12, delayMs: 280
+    },
+    expert: {
+        label: 'Expert',
+        description: 'Very strong AI: tighter sequencing, earlier power investment, and sharper battle heuristics.',
+        maxPlacementLoops: 24, placeNoise: 0, supportLoopCap: 28,
+        rangeRestrictThreshold: 1000, missingDataThreatThreshold: 1550, missingDataConstructStackMin: 2,
+        replicationThreshold: 700, samplePowerTarget: 0.93, sampleNTarget: 180,
+        metaMinAtk: 2400, metaUpgradeRatio: 0.68,
+        attackWinBonus: 1150, attackTieBonus: 300, attackLosePenalty: 170,
+        attackerSelfRiskWeight: 0.12, defenderValueWeight: 0.45,
+        randomTargetChance: 0.0, battleGuard: 14, delayMs: 220
+    }
+};
+function getAIProfile() {
+    const key = session?.aiDifficulty || 'strong';
+    return AI_DIFFICULTY_PROFILES[key] || AI_DIFFICULTY_PROFILES.strong;
+}
+function showMenu(view) {
+    const main = document.getElementById('main-menu');
+    const online = document.getElementById('lobby-menu');
+    const single = document.getElementById('single-menu');
+    const waiting = document.getElementById('lobby-waiting');
+    if (waiting && waiting.style.display !== 'none') return;
+    if (main) main.style.display = (view === 'main') ? 'flex' : 'none';
+    if (online) online.style.display = (view === 'online') ? 'flex' : 'none';
+    if (single) single.style.display = (view === 'single') ? 'flex' : 'none';
+    if (view === 'single') updateAIDifficultyUI();
+}
+function updateAIDifficultyUI() {
+    const key = session?.aiDifficulty || 'strong';
+    document.querySelectorAll('#difficulty-grid .difficulty-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.difficulty === key);
+    });
+    const desc = document.getElementById('ai-difficulty-desc');
+    if (desc) {
+        const p = AI_DIFFICULTY_PROFILES[key] || AI_DIFFICULTY_PROFILES.strong;
+        desc.innerHTML = `<span style=\"color:var(--gold)\">${p.label}</span> — ${p.description}`;
+    }
+}
+function selectAIDifficulty(key) {
+    if (!AI_DIFFICULTY_PROFILES[key]) return;
+    session.aiDifficulty = key;
+    updateAIDifficultyUI();
+}
+let localGame = null;
+
+const LOCAL_SPRITES = {
+    cog_ability: '🧠', conscient: '✅', struct_int: '🗣️', work_sample: '🧪',
+    job_perf: '🏆', turnover: '🚪', job_sat: '😊', ocb: '🤝'
+};
+
+const LOCAL_SPELL_CARDS = {
+    sample_size: { id: 'sample_size', type: 'resource', icon: 'N+100', name: 'Sample Size', desc: 'Increase target friendly monster sample size (N), boosting power.' },
+    replication: { id: 'replication', type: 'spell', icon: '⟳', name: 'Replication', desc: 'Target your monster. Grants an extra attack and preserves N for one attack.' },
+    missing_data: { id: 'missing_data', type: 'spell', icon: '∅', name: 'Missing Data', desc: 'Destroy any card on the field.' },
+    range_restrict: { id: 'range_restrict', type: 'trap', icon: '↔', name: 'Range Restriction', desc: 'Target enemy monster. Halve ATK.' },
+    correction: { id: 'correction', type: 'resource', icon: '↺', name: 'Correction', desc: 'Target your monster. Restore ATK to max.' }
+};
+
+function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
+function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+}
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+function alphaFromStack(stack) {
+    if (!stack || !stack.cards?.length) return 0;
+    return spearmanBrown(stack.cards.length, stack.cards[0].avgR);
+}
+
+function hashString(str) {
+    let h = 0;
+    for (let i = 0; i < str.length; i++) {
+        h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+    }
+    return Math.abs(h);
+}
+
+function getFunMonsterName(predId, outId) {
+    return MONSTER_NAMES?.[predId]?.[outId]
+        || `${CONSTRUCTS[predId]?.short || predId} × ${CONSTRUCTS[outId]?.short || outId}`;
+}
+
+function getMonsterSpriteForPair(predId, outId) {
+    const key = `${predId}|${outId}`;
+    const idx = hashString(key) % MONSTER_SPRITES.length;
+    return MONSTER_SPRITES[idx];
+}
+
+function getMetaTitanName(monsters) {
+    if (!monsters || monsters.length < 3) return 'Meta-Analytic Titan';
+
+    const samePred = monsters.every(m => m && m.predId === monsters[0].predId && m.predId !== 'META');
+    const sameOut  = monsters.every(m => m && m.outId === monsters[0].outId && m.outId !== 'META');
+
+    if (samePred && CONSTRUCTS[monsters[0].predId]) {
+        return `Meta-${CONSTRUCTS[monsters[0].predId].short} Titan`;
+    }
+    if (sameOut && CONSTRUCTS[monsters[0].outId]) {
+        return `Meta-${CONSTRUCTS[monsters[0].outId].short} Titan`;
+    }
+    return 'Meta-Analytic Titan';
+}
+
+/**
+ * Optional display fallback for online mode if server returns plain monsters
+ * without fun name/sprite.
+ */
+function ensureMonsterFlavor(m) {
+    if (!m) return m;
+    if (m.isMeta) {
+        if (!m.name) m.name = 'Meta-Analytic Titan';
+        if (!m.sprite) m.sprite = '🌌';
+        return m;
+    }
+    if ((!m.name || m.name.includes('×')) && m.predId && m.outId) {
+        m.name = getFunMonsterName(m.predId, m.outId);
+    }
+    if (!m.sprite) {
+        m.sprite = getMonsterSpriteForPair(m.predId, m.outId);
+    }
+    return m;
+}
+
+function calcObservedValidity(predStack, outStack) {
+    if (!predStack || !outStack) return 0;
+    const rho = (TRUE_VALIDITY[predStack.constructId] || {})[outStack.constructId] ?? 0.1;
+    const aP = alphaFromStack(predStack);
+    const aO = alphaFromStack(outStack);
+    return rho * Math.sqrt(Math.max(0.05, aP) * Math.max(0.05, aO));
+}
+function approxPowerFromROBSandN(rObs, n) {
+    const effect = Math.abs(rObs) * Math.sqrt(Math.max(5, n));
+    const z = (effect - 1.35) * 1.15;
+    return clamp(1 / (1 + Math.exp(-z)), 0.05, 0.99);
+}
+function refreshMonsterStats(m) {
+    if (!m) return;
+    if (m.isMeta) {
+        m.power = clamp(m.power ?? 0.95, 0.7, 0.99);
+        return;
+    }
+    m.rObs = m.rTrue * Math.sqrt(Math.max(0.05, m.predAlpha) * Math.max(0.05, m.outAlpha));
+    m.baseAtk = clamp(Math.round(Math.abs(m.rObs) * 5200), 300, 3200);
+    if (!m.rangeRestricted) m.atk = m.baseAtk;
+    else m.atk = Math.max(100, Math.floor(m.baseAtk / 2));
+    m.power = approxPowerFromROBSandN(m.rObs, m.n);
+}
+
+function makeItemCard(constructId) {
+    const c = CONSTRUCTS[constructId];
+    return {
+        isItem: true,
+        type: c.type,
+        constructId,
+        construct: c.name,
+        short: c.short,
+        avgR: c.avgR,
+        sprite: LOCAL_SPRITES[constructId] || '●',
+        indicator: c.type === 'predictor' ? 'Item indicator' : 'Criterion indicator'
+    };
+}
+function makeSpellCard(id) {
+    return deepClone(LOCAL_SPELL_CARDS[id]);
+}
+function buildStartingDeck() {
+    const deck = [];
+    const counts = {
+        cog_ability: 4, conscient: 4, struct_int: 4, work_sample: 4,
+        job_perf: 4, turnover: 4, job_sat: 4, ocb: 4,
+        sample_size: 6, replication: 4, missing_data: 3, range_restrict: 4, correction: 3
+    };
+    Object.entries(counts).forEach(([id, n]) => {
+        for (let i = 0; i < n; i++) {
+            if (CONSTRUCTS[id]) deck.push(makeItemCard(id));
+            else deck.push(makeSpellCard(id));
+        }
+    });
+    return shuffle(deck);
+}
+function drawCards(player, n) {
+    for (let i = 0; i < n; i++) {
+        if (player.deck.length > 0) player.hand.push(player.deck.pop());
+    }
+}
+function firstEmptySlot(arr) { return arr.findIndex(x => x === null); }
+function makeConstructStackFromCard(card) {
+    return { type: card.type, constructId: card.constructId, cards: [deepClone(card)] };
+}
+function findBestSummonPair(player) {
+    let best = null;
+    for (let i = 0; i < 3; i++) {
+        const p = player.constructs[i];
+        if (!p || p.type !== 'predictor') continue;
+        for (let j = 0; j < 3; j++) {
+            const o = player.constructs[j];
+            if (!o || o.type !== 'outcome') continue;
+            const rObs = calcObservedValidity(p, o);
+            const score = rObs + 0.03 * (p.cards.length + o.cards.length);
+            if (!best || score > best.score) best = { pred_slot: i, out_slot: j, score };
+        }
+    }
+    return best;
+}
+function buildMonster(predStack, outStack) {
+    const rho = (TRUE_VALIDITY[predStack.constructId] || {})[outStack.constructId] ?? 0.1;
+    const predAlpha = alphaFromStack(predStack);
+    const outAlpha = alphaFromStack(outStack);
+
+    const m = {
+        name: getFunMonsterName(predStack.constructId, outStack.constructId),
+        sprite: getMonsterSpriteForPair(predStack.constructId, outStack.constructId),
+        predId: predStack.constructId,
+        outId: outStack.constructId,
+        predAlpha, outAlpha,
+        rTrue: rho,
+        rObs: 0,
+        baseAtk: 0,
+        atk: 0,
+        n: 20,
+        power: 0.1,
+        attacksMade: 0,
+        maxAttacks: 1,
+        hasReplication: false,
+        rangeRestricted: false,
+        isMeta: false
+    };
+
+    refreshMonsterStats(m);
+    return m;
+}
+function buildMetaMonster(monsters) {
+    const meanR = monsters.reduce((s, m) => s + Math.abs(m.rObs || 0), 0) / monsters.length;
+    const meanAtk = monsters.reduce((s, m) => s + (m.atk || 0), 0) / monsters.length;
+
+    return {
+        name: getMetaTitanName(monsters),
+        sprite: '🌌',
+        predId: 'META',
+        outId: 'META',
+        predAlpha: 0.99,
+        outAlpha: 0.99,
+        rTrue: clamp(meanR * 1.35, 0.35, 0.95),
+        rObs: clamp(meanR * 1.25, 0.35, 0.9),
+        baseAtk: clamp(Math.round(meanAtk * 1.45), 2400, 5200),
+        atk: 0,
+        n: 220,
+        power: 0.97,
+        attacksMade: 0,
+        maxAttacks: 2,
+        hasReplication: false,
+        rangeRestricted: false,
+        isMeta: true
+    };
+}
+function finalizeMetaMonster(m) {
+    m.atk = m.baseAtk;
+    m.power = clamp(0.9 + (m.n / 1000), 0.9, 0.99);
+    return m;
+}
+function logLocal(msg, type='info-log') {
+    if (!localGame) return;
+    localGame.log.push({ msg, type });
+}
+function markGameOverIfNeeded() {
+    if (!localGame || localGame.status === 'finished') return;
+    const p1 = localGame.players[1], p2 = localGame.players[2];
+    if (p1.lp <= 0 || p2.lp <= 0) {
+        localGame.status = 'finished';
+        localGame.winner = p1.lp > 0 ? 1 : 2;
+        logLocal(`P${localGame.winner} wins the duel!`, 'meta-log');
+    }
+}
+function maybeDeckOutDamage(player, pid) {
+    if (player.deck.length === 0 && player.hand.length === 0) {
+        player.lp = Math.max(0, player.lp - 500);
+        logLocal(`P${pid} suffers 500 LP fatigue (empty deck and hand).`, 'error-log');
+        markGameOverIfNeeded();
+    }
+}
+function startTurnFor(pid) {
+    const p = localGame.players[pid];
+    p.summoned = false;
+    drawCards(p, 1);
+    p.monsters.forEach(m => { if (m) { m.attacksMade = 0; m.maxAttacks = m.isMeta ? 2 : (m.hasReplication ? 2 : 1); } });
+    logLocal(`P${pid} draws a card.`, 'info-log');
+    maybeDeckOutDamage(p, pid);
+}
+function initLocalGame() {
+    localGame = {
+        status: 'active',
+        currentPlayer: 1,
+        winner: null,
+        log: [],
+        players: {
+            1: { lp: 8000, deck: buildStartingDeck(), hand: [], constructs: [null, null, null], monsters: [null, null, null], summoned: false },
+            2: { lp: 8000, deck: buildStartingDeck(), hand: [], constructs: [null, null, null], monsters: [null, null, null], summoned: false }
+        }
+    };
+    drawCards(localGame.players[1], 5);
+    drawCards(localGame.players[2], 5);
+    const aiProfile = getAIProfile();
+    logLocal(`Single-player mode started. You are P1. ${aiProfile.label} AI is P2.`, 'meta-log');
+    logLocal('P1 begins the duel.', 'info-log');
+}
+function projectStateForPlayer(pid) {
+    const me = localGame.players[pid];
+    const opp = localGame.players[pid === 1 ? 2 : 1];
+    return {
+        status: localGame.status,
+        i_won: localGame.status === 'finished' ? localGame.winner === pid : false,
+        is_my_turn: localGame.currentPlayer === pid,
+        my_lp: me.lp,
+        opp_lp: opp.lp,
+        my_hand: deepClone(me.hand),
+        opp_hand_count: opp.hand.length,
+        my_deck_count: me.deck.length,
+        my_constructs: deepClone(me.constructs),
+        opp_constructs: deepClone(opp.constructs),
+        my_monsters: deepClone(me.monsters),
+        opp_monsters: deepClone(opp.monsters),
+        my_summoned: me.summoned,
+        log: deepClone(localGame.log)
+    };
+}
+function consumeAttackSample(monster) {
+    if (!monster) return;
+    const preserve = !!monster.hasReplication;
+    if (preserve) {
+        monster.hasReplication = false;
+    } else {
+        monster.n = 20;
+    }
+    if (!monster.isMeta) {
+        refreshMonsterStats(monster);
+    } else {
+        monster.power = clamp(0.9 + (monster.n / 1200), 0.9, 0.99);
+    }
+}
+function localCanMeta(player) {
+    const m = player.monsters;
+    if (!(m[0] && m[1] && m[2])) return false;
+    const samePred = m.every(x => x.predId === m[0].predId && x.predId !== 'META');
+    const sameOut = m.every(x => x.outId === m[0].outId && x.outId !== 'META');
+    return samePred || sameOut;
+}
+function localAttackResolution(attacker, defender) {
+    if (!defender) return { damage: attacker.atk, outcome: 'win', destroyAttacker: false, destroyDefender: false };
+    if (attacker.atk > defender.atk) return { damage: attacker.atk - defender.atk, outcome: 'win', destroyAttacker: false, destroyDefender: true };
+    if (attacker.atk < defender.atk) return { damage: defender.atk - attacker.atk, outcome: 'lose', destroyAttacker: true, destroyDefender: false };
+    return { damage: 0, outcome: 'tie', destroyAttacker: true, destroyDefender: true };
+}
+
+function applyLocalMove(pid, move) {
+    if (!localGame) return { success: false, message: 'Local game not initialized' };
+    if (localGame.status === 'finished') return { success: false, message: 'Game already finished' };
+    if (localGame.currentPlayer !== pid) return { success: false, message: 'Not your turn' };
+
+    const me = localGame.players[pid];
+    const opp = localGame.players[pid === 1 ? 2 : 1];
+    let move_result = null;
+
+    const removeHandCard = (idx) => {
+        if (idx < 0 || idx >= me.hand.length) return null;
+        return me.hand.splice(idx, 1)[0];
+    };
+
+    if (move.type === 'place_card') {
+        const card = me.hand[move.hand_index];
+        if (!card || !card.isItem) return { success: false, message: 'Select a construct item card' };
+        const slotIdx = move.slot;
+        if (slotIdx < 0 || slotIdx > 2) return { success: false, message: 'Invalid slot' };
+        const existing = me.constructs[slotIdx];
+        if (existing && existing.constructId !== card.constructId) return { success: false, message: 'Slot contains a different construct' };
+        if (existing && existing.cards.length >= 3) return { success: false, message: 'Construct stack is already at 3 items' };
+        const placed = removeHandCard(move.hand_index);
+        if (!existing) me.constructs[slotIdx] = makeConstructStackFromCard(placed);
+        else existing.cards.push(deepClone(placed));
+        const stack = me.constructs[slotIdx];
+        logLocal(`P${pid} places ${placed.construct} (${stack.cards.length}/3) in construct slot ${slotIdx + 1}.`, 'formula-log');
+    }
+    else if (move.type === 'summon') {
+        if (me.summoned) return { success: false, message: 'You can only summon once per turn' };
+    
+        const mSlot = firstEmptySlot(me.monsters);
+        if (mSlot === -1) return { success: false, message: 'No empty monster slot' };
+    
+        // Safety check: must use two different construct slots
+        if (move.pred_slot === move.out_slot) {
+            return { success: false, message: 'Predictor and Outcome must be different slots' };
+        }
+    
+        const pred = me.constructs[move.pred_slot];
+        const out = me.constructs[move.out_slot];
+    
+        if (!pred || pred.type !== 'predictor') return { success: false, message: 'Choose a predictor construct' };
+        if (!out || out.type !== 'outcome') return { success: false, message: 'Choose an outcome construct' };
+    
+        // Build the monster FIRST (uses the construct stats)
+        const monster = buildMonster(pred, out);
+    
+        // Consume the summon materials (remove construct stacks from field)
+        me.constructs[move.pred_slot] = null;
+        me.constructs[move.out_slot] = null;
+    
+        // Place summoned monster
+        me.monsters[mSlot] = monster;
+        me.summoned = true;
+    
+        logLocal(
+            `P${pid} summons ${monster.name} (ATK ${monster.atk}, PWR ${Math.floor(monster.power * 100)}%) by consuming construct materials.`,
+            'formula-log'
+        );
+    }
+    else if (move.type === 'play_spell') {
+        const card = me.hand[move.hand_index];
+        if (!card || card.isItem) return { success: false, message: 'Select a spell/trap/resource card' };
+        const targetPlayer = move.target_owner === 'opp' ? opp : me;
+        const targetPid = move.target_owner === 'opp' ? (pid === 1 ? 2 : 1) : pid;
+        const targetArr = move.target_type === 'construct' ? targetPlayer.constructs : targetPlayer.monsters;
+        const target = targetArr[move.target_slot];
+        if (!target) return { success: false, message: 'No valid target there' };
+
+        removeHandCard(move.hand_index);
+
+        if (card.id === 'sample_size') {
+            if (move.target_type !== 'monster') return { success: false, message: 'Sample Size must target a monster' };
+            target.n = clamp(target.n + 100, 20, 420);
+            if (!target.isMeta) refreshMonsterStats(target);
+            else target.power = clamp(target.power + 0.01, 0.9, 0.99);
+            logLocal(`P${pid} plays Sample Size on P${targetPid}'s monster (N = ${target.n}, PWR ${Math.floor(target.power * 100)}%).`, 'spell-log');
+        }
+        else if (card.id === 'replication') {
+            if (move.target_type !== 'monster' || targetPlayer !== me) return { success: false, message: 'Replication must target your monster' };
+            target.hasReplication = true;
+            target.maxAttacks = Math.max(target.maxAttacks, 2);
+            logLocal(`P${pid} plays Replication. ${target.name} gains an extra attack and preserves N once.`, 'spell-log');
+        }
+        else if (card.id === 'missing_data') {
+            if (move.target_type === 'construct') {
+                const destroyed = targetArr[move.target_slot];
+                targetArr[move.target_slot] = null;
+                logLocal(`P${pid} plays Missing Data and destroys P${targetPid}'s ${destroyed.cards[0].construct} construct stack.`, 'spell-log');
+            } else {
+                const destroyed = targetArr[move.target_slot];
+                targetArr[move.target_slot] = null;
+                logLocal(`P${pid} plays Missing Data and destroys P${targetPid}'s monster ${destroyed.name}.`, 'spell-log');
+            }
+        }
+        else if (card.id === 'range_restrict') {
+            if (move.target_type !== 'monster' || targetPlayer !== opp) return { success: false, message: 'Range Restriction must target an enemy monster' };
+            target.rangeRestricted = true;
+            target.atk = Math.max(100, Math.floor((target.baseAtk ?? target.atk) / 2));
+            logLocal(`P${pid} applies Range Restriction to ${target.name}. ATK reduced to ${target.atk}.`, 'spell-log');
+        }
+        else if (card.id === 'correction') {
+            if (move.target_type !== 'monster' || targetPlayer !== me) return { success: false, message: 'Correction must target your monster' };
+            target.rangeRestricted = false;
+            target.atk = target.baseAtk ?? target.atk;
+            logLocal(`P${pid} applies Correction to ${target.name}. ATK restored to ${target.atk}.`, 'spell-log');
+        }
+        else {
+            return { success: false, message: 'Unknown card effect' };
+        }
+    }
+    else if (move.type === 'attack') {
+        const attacker = me.monsters[move.attacker_slot];
+        if (!attacker) return { success: false, message: 'No attacker in that slot' };
+        if (attacker.attacksMade >= attacker.maxAttacks) return { success: false, message: 'This monster has no attacks left' };
+
+        const threshold = clamp(Math.round(attacker.power * 20), 1, 20);
+        const roll = randInt(1, 20);
+        const hit = roll <= threshold;
+        move_result = { roll, threshold, hit, attack_data: { damage: 0, outcome: 'tie' } };
+
+        attacker.attacksMade += 1;
+
+        if (!hit) {
+            logLocal(`P${pid}'s ${attacker.name} attacks and rolls ${roll} (needs ≤ ${threshold}). Type II error — attack misses.`, 'battle-log');
+            consumeAttackSample(attacker);
+        } else {
+            if (move.target_type === 'lp') {
+                const dmg = attacker.atk;
+                opp.lp = Math.max(0, opp.lp - dmg);
+                move_result.attack_data = { damage: dmg, outcome: 'win' };
+                logLocal(`P${pid}'s ${attacker.name} attacks directly for ${dmg} LP damage!`, 'battle-log');
+                consumeAttackSample(attacker);
+            } else {
+                const defender = opp.monsters[move.target_slot];
+                if (!defender) {
+                    logLocal(`P${pid}'s attack fizzles: target no longer exists.`, 'error-log');
+                    consumeAttackSample(attacker);
+                } else {
+                    const outcome = localAttackResolution(attacker, defender);
+                    if (outcome.outcome === 'win') {
+                        if (outcome.destroyDefender) opp.monsters[move.target_slot] = null;
+                        if (outcome.damage > 0) opp.lp = Math.max(0, opp.lp - outcome.damage);
+                        logLocal(`P${pid}'s ${attacker.name} defeats ${defender.name}${outcome.damage > 0 ? ` and deals ${outcome.damage} LP damage` : ''}.`, 'battle-log');
+                    } else if (outcome.outcome === 'lose') {
+                        if (outcome.destroyAttacker) me.monsters[move.attacker_slot] = null;
+                        if (outcome.damage > 0) me.lp = Math.max(0, me.lp - outcome.damage);
+                        logLocal(`P${pid}'s ${attacker.name} loses to ${defender.name}${outcome.damage > 0 ? ` and P${pid} takes ${outcome.damage} LP damage` : ''}.`, 'battle-log');
+                    } else {
+                        if (outcome.destroyAttacker) me.monsters[move.attacker_slot] = null;
+                        if (outcome.destroyDefender) opp.monsters[move.target_slot] = null;
+                        logLocal(`P${pid}'s ${attacker.name} and ${defender.name} destroy each other.`, 'battle-log');
+                    }
+                    move_result.attack_data = { damage: outcome.damage, outcome: outcome.outcome };
+                    if (me.monsters[move.attacker_slot]) consumeAttackSample(me.monsters[move.attacker_slot]);
+                }
+            }
+        }
+        markGameOverIfNeeded();
+    }
+    else if (move.type === 'meta') {
+        if (!localCanMeta(me)) return { success: false, message: 'Need 3 monsters sharing the same Predictor or Outcome' };
+        const mats = me.monsters.filter(Boolean);
+        me.monsters = [null, null, null];
+        const meta = finalizeMetaMonster(buildMetaMonster(mats));
+        me.monsters[0] = meta;
+        move_result = { meta: true };
+        logLocal(`P${pid} performs META-ANALYSIS and summons ${meta.name}! (ATK ${meta.atk}, PWR ${Math.floor(meta.power * 100)}%)`, 'meta-log');
+    }
+    else if (move.type === 'end_turn') {
+        const nextPid = pid === 1 ? 2 : 1;
+        localGame.currentPlayer = nextPid;
+        startTurnFor(nextPid);
+        logLocal(`P${pid} ends turn.`, 'info-log');
+    }
+    else {
+        return { success: false, message: 'Unknown move type' };
+    }
+
+    markGameOverIfNeeded();
+    return { success: true, move_result };
+}
+
+function aiBestCardIndices(hand, predicate) {
+    const out = [];
+    hand.forEach((c, i) => { if (predicate(c)) out.push(i); });
+    return out;
+}
+function aiPlaceItems(pid) {
+    const p = localGame.players[pid];
+    let progressed = false;
+    const ai = getAIProfile();
+    let safety = 0;
+    while (safety++ < ai.maxPlacementLoops) {
+        let best = null;
+        p.hand.forEach((card, idx) => {
+            if (!card.isItem) return;
+            for (let s = 0; s < 3; s++) {
+                const stack = p.constructs[s];
+                if (stack && stack.constructId !== card.constructId) continue;
+                if (stack && stack.cards.length >= 3) continue;
+                let score = 0;
+                score += stack ? 8 + stack.cards.length * 3 : 5;
+                if (card.type === 'predictor') score += 1; else score += 1;
+                // Bonus if this stack can improve an existing monster family or future summon quality
+                const tempStack = stack ? { ...stack, cards: [...stack.cards, card] } : makeConstructStackFromCard(card);
+                if (card.type === 'predictor') {
+                    p.constructs.forEach(os => { if (os && os.type === 'outcome') score += calcObservedValidity(tempStack, os) * 10; });
+                } else {
+                    p.constructs.forEach(ps => { if (ps && ps.type === 'predictor') score += calcObservedValidity(ps, tempStack) * 10; });
+                }
+                score += (Math.random() * 2 - 1) * (ai.placeNoise || 0);
+                if (!best || score > best.score) best = { idx, slot: s, score };
+            }
+        });
+        if (!best) break;
+        const res = applyLocalMove(pid, { type: 'place_card', hand_index: best.idx, slot: best.slot });
+        if (!res.success) break;
+        progressed = true;
+    }
+    return progressed;
+}
+function aiUseSupport(pid) {
+    const p = localGame.players[pid];
+    const enemy = localGame.players[pid === 1 ? 2 : 1];
+    const ai = getAIProfile();
+    let acted = false;
+    let loop = 0;
+    while (loop++ < ai.supportLoopCap) {
+        let performed = false;
+        // Correction on strongest debuffed own monster
+        let cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'correction');
+        if (cIdx !== -1) {
+            let target = -1, delta = 0;
+            p.monsters.forEach((m, i) => {
+                if (!m || m.isMeta) return;
+                const d = (m.baseAtk ?? m.atk) - m.atk;
+                if (d > delta) { delta = d; target = i; }
+            });
+            if (target !== -1 && delta > 100) {
+                applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'me', target_type: 'monster', target_slot: target });
+                acted = performed = true;
+            }
+        }
+        if (performed) continue;
+
+        // Range Restriction on highest enemy ATK threat
+        cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'range_restrict');
+        if (cIdx !== -1) {
+            let target = -1, bestAtk = 0;
+            enemy.monsters.forEach((m, i) => { if (m && m.atk > bestAtk) { bestAtk = m.atk; target = i; } });
+            if (target !== -1 && bestAtk >= ai.rangeRestrictThreshold) {
+                applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'opp', target_type: 'monster', target_slot: target });
+                acted = performed = true;
+            }
+        }
+        if (performed) continue;
+
+        // Missing Data on lethal-ish enemy monster or 3-stack construct
+        cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'missing_data');
+        if (cIdx !== -1) {
+            let targetMonster = -1, threat = 0;
+            enemy.monsters.forEach((m, i) => { if (m && (m.atk + m.power * 400) > threat) { threat = m.atk + m.power * 400; targetMonster = i; } });
+            if (targetMonster !== -1 && threat >= ai.missingDataThreatThreshold) {
+                applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'opp', target_type: 'monster', target_slot: targetMonster });
+                acted = performed = true;
+            } else {
+                let targetConstruct = -1, stackSize = 0;
+                enemy.constructs.forEach((c, i) => { if (c && c.cards.length > stackSize) { stackSize = c.cards.length; targetConstruct = i; } });
+                if (targetConstruct !== -1 && stackSize >= ai.missingDataConstructStackMin) {
+                    applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'opp', target_type: 'construct', target_slot: targetConstruct });
+                    acted = performed = true;
+                }
+            }
+        }
+        if (performed) continue;
+
+        // Replication on highest expected-value attacker
+        cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'replication');
+        if (cIdx !== -1) {
+            let target = -1, score = 0;
+            p.monsters.forEach((m, i) => {
+                if (!m || m.hasReplication || m.attacksMade >= m.maxAttacks) return;
+                const s = m.atk * m.power;
+                if (s > score) { score = s; target = i; }
+            });
+            if (target !== -1 && score >= ai.replicationThreshold) {
+                applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'me', target_type: 'monster', target_slot: target });
+                acted = performed = true;
+            }
+        }
+        if (performed) continue;
+
+        // Sample Size on strongest available attacker until decent power
+        cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'sample_size');
+        if (cIdx !== -1) {
+            let target = -1, score = -1;
+            p.monsters.forEach((m, i) => {
+                if (!m || m.attacksMade >= m.maxAttacks) return;
+                const s = m.atk * (1 - m.power);
+                if (s > score) { score = s; target = i; }
+            });
+            if (target !== -1) {
+                const m = p.monsters[target];
+                if (m.power < ai.samplePowerTarget || m.n < ai.sampleNTarget) {
+                    applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'me', target_type: 'monster', target_slot: target });
+                    acted = performed = true;
+                }
+            }
+        }
+        if (!performed) break;
+    }
+    return acted;
+}
+function aiTrySummon(pid) {
+    const p = localGame.players[pid];
+    if (p.summoned) return false;
+    if (firstEmptySlot(p.monsters) === -1) return false;
+    const pair = findBestSummonPair(p);
+    if (!pair) return false;
+    return applyLocalMove(pid, { type: 'summon', pred_slot: pair.pred_slot, out_slot: pair.out_slot }).success;
+}
+function aiTryMeta(pid) {
+    const p = localGame.players[pid];
+    const ai = getAIProfile();
+    if (!localCanMeta(p)) return false;
+    // use meta when it substantially upgrades strongest board presence
+    const currentSum = p.monsters.reduce((s, m) => s + (m ? m.atk : 0), 0);
+    const estMeta = finalizeMetaMonster(buildMetaMonster(p.monsters.filter(Boolean)));
+    if (estMeta.atk >= Math.max(ai.metaMinAtk, currentSum * ai.metaUpgradeRatio) || p.monsters.filter(Boolean).length === 3) {
+        return applyLocalMove(pid, { type: 'meta' }).success;
+    }
+    return false;
+}
+function aiPickAttackTarget(pid, attackerSlot) {
+    const ai = getAIProfile();
+    const p = localGame.players[pid];
+    const enemy = localGame.players[pid === 1 ? 2 : 1];
+    const attacker = p.monsters[attackerSlot];
+    if (!attacker) return { target_type: 'lp', target_slot: null };
+    const enemyHasMonsters = enemy.monsters.some(Boolean);
+    if (!enemyHasMonsters) return { target_type: 'lp', target_slot: null };
+
+    const targetOptions = [];
+    enemy.monsters.forEach((d, i) => {
+        if (!d) return;
+        const sim = localAttackResolution(attacker, d);
+        let score = 0;
+        if (sim.outcome === 'win') score += ai.attackWinBonus + sim.damage + d.atk * ai.defenderValueWeight;
+        if (sim.outcome === 'tie') score += ai.attackTieBonus + d.atk * (ai.defenderValueWeight * 0.6);
+        if (sim.outcome === 'lose') score -= ai.attackLosePenalty + sim.damage + attacker.atk * ai.attackerSelfRiskWeight;
+        score *= attacker.power;
+        if (enemy.lp <= (sim.outcome === 'win' ? sim.damage : 0)) score += 5000;
+        targetOptions.push({ target_type: 'monster', target_slot: i, score });
+    });
+
+    if (!targetOptions.length) return { target_type: 'lp', target_slot: null };
+    if (ai.randomTargetChance > 0 && Math.random() < ai.randomTargetChance) {
+        const randomOption = targetOptions[randInt(0, targetOptions.length - 1)];
+        return { target_type: randomOption.target_type, target_slot: randomOption.target_slot };
+    }
+
+    targetOptions.sort((a, b) => b.score - a.score);
+    return { target_type: targetOptions[0].target_type, target_slot: targetOptions[0].target_slot };
+}
+function aiBattlePhase(pid) {
+    const ai = getAIProfile();
+    const p = localGame.players[pid];
+    let guard = 0;
+    while (guard++ < ai.battleGuard && localGame.status === 'active' && localGame.currentPlayer === pid) {
+        // Before each attack, top off best attacker with Sample Size if available
+        aiUseSupport(pid);
+        let bestSlot = -1, bestScore = -Infinity;
+        p.monsters.forEach((m, i) => {
+            if (!m || m.attacksMade >= m.maxAttacks) return;
+            let score = m.atk * m.power + (m.hasReplication ? 220 : 0);
+            if (m.attacksMade === 0) score += 30;
+            if (m.power >= 0.9) score += 40;
+            if (score > bestScore) { bestScore = score; bestSlot = i; }
+        });
+        if (bestSlot === -1) break;
+        const target = aiPickAttackTarget(pid, bestSlot);
+        applyLocalMove(pid, { type: 'attack', attacker_slot: bestSlot, target_type: target.target_type, target_slot: target.target_slot });
+    }
+}
+async function runSinglePlayerAI() {
+    if (!localGame || localGame.status !== 'active') return;
+    if (localGame.currentPlayer !== 2) return;
+
+    const ai = getAIProfile();
+    // Small pause for UX so the player sees the turn switch before logs/actions resolve.
+    await new Promise(r => setTimeout(r, ai.delayMs));
+
+    const pid = 2;
+    aiPlaceItems(pid);
+    aiTrySummon(pid);
+    aiUseSupport(pid);
+    aiTryMeta(pid);
+    aiUseSupport(pid);
+    if (session.aiDifficulty === 'strong' || session.aiDifficulty === 'expert') {
+        aiPlaceItems(pid);
+        aiTrySummon(pid);
+        aiUseSupport(pid);
+        aiTryMeta(pid);
+    }
+    aiBattlePhase(pid);
+
+    if (localGame.status === 'active' && localGame.currentPlayer === pid) {
+        applyLocalMove(pid, { type: 'end_turn' });
+    }
+}
+async function localSubmitMove(move) {
+    const out = applyLocalMove(1, move);
+    if (!out.success) return { success: false, message: out.message };
+    // If player ended turn, execute the strong AI immediately before returning state.
+    if (move.type === 'end_turn' && localGame.status === 'active') {
+        await runSinglePlayerAI();
+    }
+    return { success: true, state: projectStateForPlayer(1), move_result: out.move_result };
+}
+function startSinglePlayer() {
+    clearInterval(session.pollTimer);
+    session.gameMode = 'single';
+    session.roomCode = 'LOCAL-AI';
+    session.playerToken = 'LOCAL';
+    session.playerNum = 1;
+    lastLogCount = 0;
+    gameOver = false;
+    selectedHandCard = null;
+    summonPredSlot = null;
+    attackingMonsterSlot = null;
+    uiPhase = 'idle';
+    initLocalGame();
+    gs = projectStateForPlayer(1);
+    startGame();
+}
+
+// ==================== SESSION STATE ====================
+let session = {
+    roomCode: null,
+    playerToken: null,
+    playerNum: null,
+    pollTimer: null,
+    gameMode: 'online',
+    aiDifficulty: 'strong'
+};
+
+// Local mirror of the filtered server state
+let gs = null; // game state from server
+let uiPhase = 'idle'; // local UI phase for selection
+let selectedHandCard = null;
+let summonPredSlot = null;
+let attackingMonsterSlot = null;
+let gameOver = false;
+let lastLogCount = 0;
+
+// ==================== API CALLS ====================
+async function apiCall(body) {
+    try {
+        const res = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        return await res.json();
+    } catch (e) {
+        console.error('API error:', e);
+        return { success: false, message: 'Network error' };
+    }
+}
+
+// ==================== LOBBY ====================
+async function createRoom() {
+    session.gameMode = 'online';
+    const res = await apiCall({ action: 'create_room' });
+    if (!res.success) { alert(res.message); return; }
+    session.roomCode = res.room_code;
+    session.playerToken = res.player_token;
+    session.playerNum = res.player_num;
+
+    document.getElementById('main-menu').style.display = 'none';
+    document.getElementById('single-menu').style.display = 'none';
+    document.getElementById('lobby-menu').style.display = 'none';
+    document.getElementById('lobby-waiting').style.display = 'flex';
+    document.getElementById('room-code-display').textContent = res.room_code;
+
+    startLobbyPolling();
+}
+
+async function joinRoom() {
+    session.gameMode = 'online';
+    const code = document.getElementById('join-code-input').value.trim().toUpperCase();
+    if (code.length !== 10) { alert('Enter a valid 10-character room code'); return; }
+
+    const res = await apiCall({ action: 'join_room', room_code: code });
+    if (!res.success) { alert(res.message); return; }
+    session.roomCode = res.room_code;
+    session.playerToken = res.player_token;
+    session.playerNum = res.player_num;
+
+    startGame();
+}
+
+function copyRoomCode() {
+    navigator.clipboard?.writeText(session.roomCode);
+    document.getElementById('lobby-status').textContent = 'Code copied!';
+    setTimeout(() => { document.getElementById('lobby-status').textContent = 'Waiting for opponent...'; }, 1500);
+}
+
+function startLobbyPolling() {
+    session.pollTimer = setInterval(async () => {
+        const res = await apiCall({ action: 'poll', room_code: session.roomCode, player_token: session.playerToken });
+        if (res.success && res.state && res.state.status === 'active') {
+            clearInterval(session.pollTimer);
+            startGame();
+        }
+    }, 1500);
+}
+
+// ==================== GAME START ====================
+function startGame() {
+    document.getElementById('title-screen').style.display = 'none';
+    document.getElementById('game-screen').classList.add('active');
+    startGamePolling();
+}
+
+function startGamePolling() {
+    pollNow();
+    if (session.gameMode === 'single') return;
+    session.pollTimer = setInterval(pollNow, 2000);
+}
+
+async function pollNow() {
+    if (session.gameMode === 'single') {
+        if (!localGame) return;
+        gs = projectStateForPlayer(session.playerNum || 1);
+        if (gs.log && gs.log.length > lastLogCount) {
+            for (let i = lastLogCount; i < gs.log.length; i++) {
+                addLog(gs.log[i].msg, gs.log[i].type);
+            }
+            lastLogCount = gs.log.length;
+        }
+        if (gs.status === 'finished' && !gameOver) {
+            gameOver = true;
+            endGame(gs.i_won);
+        }
+        renderAll();
+        return;
+    }
+
+    const res = await apiCall({ action: 'poll', room_code: session.roomCode, player_token: session.playerToken });
+    if (!res.success) return;
+    gs = res.state;
+
+    // Process new log entries
+    if (gs.log && gs.log.length > lastLogCount) {
+        for (let i = lastLogCount; i < gs.log.length; i++) {
+            addLog(gs.log[i].msg, gs.log[i].type);
+        }
+        lastLogCount = gs.log.length;
+    }
+
+    // Check game over
+    if (gs.status === 'finished' && !gameOver) {
+        gameOver = true;
+        endGame(gs.i_won);
+    }
+
+    renderAll();
+}
+
+// ==================== SUBMIT MOVE ====================
+async function submitMove(move, skipRender = false) {
+    const res = session.gameMode === 'single'
+        ? await localSubmitMove(move)
+        : await apiCall({
+            action: 'submit_move',
+            room_code: session.roomCode,
+            player_token: session.playerToken,
+            move: move
+        });
+
+    if (!res.success) {
+        addLog('Error: ' + res.message, 'error-log');
+        return res;
+    }
+
+    if (!skipRender) {
+        gs = res.state;
+
+        // Process new logs
+        if (gs.log && gs.log.length > lastLogCount) {
+            for (let i = lastLogCount; i < gs.log.length; i++) {
+                addLog(gs.log[i].msg, gs.log[i].type);
+            }
+            lastLogCount = gs.log.length;
+        }
+
+        if (gs.status === 'finished' && !gameOver) {
+            gameOver = true;
+            endGame(gs.i_won);
+        }
+
+        renderAll();
+    }
+    return res;
+}
+
+// ==================== RENDERING ====================
+function renderCard(card, idx, inHand) {
+    const div = document.createElement('div');
+    div.className = `card ${card.type}` + (selectedHandCard === idx && inHand ? ' selected' : '');
+    if (inHand) div.onclick = () => selectHandCard(idx);
+
+    if (card.isItem) {
+        div.innerHTML = `
+            <div class="card-type-badge">${card.type === 'predictor' ? '⬢ PREDICTOR' : '◆ OUTCOME'}</div>
+            <div class="card-construct">${card.sprite} ${card.short}</div>
+            <div class="card-indicator">${card.indicator}</div>
+            <div class="card-stats"><span>r̄=${card.avgR.toFixed(2)}</span></div>
+        `;
+    } else {
+        div.innerHTML = `
+            <div class="card-type-badge">${card.type.toUpperCase()}</div>
+            <div class="card-construct">${card.icon}</div>
+            <div class="card-indicator" style="font-size:0.8cqmin;">${card.name}</div>
+        `;
+    }
+    div.onmouseenter = (e) => showCardTooltip(e, card);
+    div.onmouseleave = hideTooltip;
+    return div;
+}
+
+function renderConstructSlot(slotIdx, owner) {
+    const constructs = owner === 'player' ? gs.my_constructs : gs.opp_constructs;
+    const prefix = owner === 'player' ? 'player' : 'opp';
+    const slot = document.getElementById(`${prefix}-construct-${slotIdx}`);
+    slot.innerHTML = '';
+    slot.className = 'card-slot';
+    const c = constructs[slotIdx];
+
+    if (uiPhase === 'spell_target_missing_data' && c) {
+        slot.classList.add('spell-target');
+        slot.onclick = () => executeMissingData(slotIdx, owner, 'construct');
+    } else {
+        slot.onclick = owner === 'player' ? () => onConstructSlotClick(slotIdx) : null;
+    }
+
+    if (!c) return;
+    const k = c.cards.length;
+    const rel = spearmanBrown(k, c.cards[0].avgR);
+    const topCard = c.cards[k - 1];
+    const div = document.createElement('div');
+    div.className = `card ${topCard.type}`;
+    div.style.cursor = 'pointer';
+    div.innerHTML = `
+        <div class="card-type-badge">${topCard.type === 'predictor' ? '⬢ PRED' : '◆ OUT'}</div>
+        <div class="card-construct">${topCard.sprite} ${topCard.short}</div>
+        <div class="card-indicator" style="font-size:0.7cqmin;">α = ${rel.toFixed(2)}</div>
+    `;
+    if (k > 1) div.innerHTML += `<div class="stack-count">×${k}</div>`;
+    div.onmouseenter = (e) => showConstructTooltip(e, c);
+    div.onmouseleave = hideTooltip;
+    slot.appendChild(div);
+}
+
+function renderMonsterSlot(slotIdx, owner) {
+    const monsters = owner === 'player' ? gs.my_monsters : gs.opp_monsters;
+    const prefix = owner === 'player' ? 'player' : 'opp';
+    const slot = document.getElementById(`${prefix}-monster-${slotIdx}`);
+    slot.innerHTML = '';
+    slot.className = 'card-slot';
+    const m = monsters[slotIdx];
+
+    if (m) ensureMonsterFlavor(m);
+
+    // Spell targeting highlights
+    if (uiPhase === 'spell_target_range' && owner === 'opp' && m) {
+        slot.classList.add('spell-target');
+        slot.onclick = () => executeRangeRestrict(slotIdx);
+    } else if (uiPhase === 'spell_target_correct' && owner === 'player' && m && !m.isMeta) {
+        slot.classList.add('spell-target');
+        slot.onclick = () => executeCorrection(slotIdx);
+    } else if (uiPhase === 'spell_target_sample_size' && owner === 'player' && m) {
+        slot.classList.add('resource-target');
+        slot.onclick = () => executeSampleSize(slotIdx);
+    } else if (uiPhase === 'spell_target_missing_data' && m) {
+        slot.classList.add('spell-target');
+        slot.onclick = () => executeMissingData(slotIdx, owner, 'monster');
+    } else if (uiPhase === 'spell_target_replication' && owner === 'player' && m) {
+        slot.classList.add('spell-target');
+        slot.onclick = () => executeReplication(slotIdx);
+    } else {
+        slot.onclick = null;
+    }
+
+    if (!m) return;
+
+    const isMyTurn = gs.is_my_turn;
+    const canAttack = owner === 'player' && m.attacksMade < m.maxAttacks && uiPhase !== 'attack_select_target' && !uiPhase.startsWith('spell');
+    const div = document.createElement('div');
+    div.className = 'monster-card' + (canAttack ? ' can-attack' : '');
+    if (m.isMeta) div.classList.add('is-meta');
+    if (attackingMonsterSlot === slotIdx && owner === 'player') div.classList.add('attacking');
+
+    if (owner === 'player' && uiPhase === 'attack_select_monster' && m.attacksMade < m.maxAttacks) {
+        div.onclick = () => selectAttackingMonster(slotIdx);
+    } else if (owner === 'opp' && uiPhase === 'attack_select_target') {
+        slot.classList.add('attack-target');
+        div.onclick = () => selectAttackTarget('monster', slotIdx);
+    }
+
+    let pwrPercent = Math.floor(m.power * 100);
+    let pwrColor = pwrPercent < 50 ? '#ff5555' : (pwrPercent < 80 ? '#ffcc00' : '#50fa7b');
+    let atkCountHtml = m.maxAttacks > 1 ? `<div style="font-size:0.6cqmin; color:#aaa; text-align:center;">Atks: ${m.maxAttacks - m.attacksMade}</div>` : '';
+    let repHtml = m.hasReplication ? `<span style="color:var(--spell); font-size:0.6cqmin;">[REP]</span>` : '';
+
+    div.innerHTML = `
+        <div class="monster-name">${m.name}</div>
+        <div class="monster-sprite">${m.sprite}</div>
+        <div class="monster-stats-bar">
+            <span>ATK ${m.atk}</span>
+            <span style="color:#aaa;">N=${m.n} ${repHtml}</span>
+        </div>
+        <div class="monster-reliability" style="color:${m.isMeta ? 'var(--gold)' : pwrColor}">PWR: ${pwrPercent}% ${m.isMeta?'(META)':''}</div>
+        ${atkCountHtml}
+    `;
+    div.onmouseenter = (e) => showMonsterTooltip(e, m);
+    div.onmouseleave = hideTooltip;
+    slot.appendChild(div);
+}
+
+function renderHand() {
+    const container = document.getElementById('player-hand');
+    container.innerHTML = '';
+    if (!gs) return;
+    gs.my_hand.forEach((card, i) => container.appendChild(renderCard(card, i, true)));
+
+    // Opponent hand (card backs)
+    const oppContainer = document.getElementById('opp-hand-row');
+    oppContainer.innerHTML = '';
+    for (let i = 0; i < gs.opp_hand_count; i++) {
+        oppContainer.innerHTML += `<div class="card-back"><div style="font-size:2cqmin; color:#555;">?</div></div>`;
+    }
+}
+
+function renderAll() {
+    if (!gs) return;
+    renderHand();
+    for (let i = 0; i < 3; i++) {
+        renderConstructSlot(i, 'player');
+        renderConstructSlot(i, 'opp');
+        renderMonsterSlot(i, 'player');
+        renderMonsterSlot(i, 'opp');
+    }
+    updateLP();
+    updateButtons();
+    document.getElementById('deck-count').textContent = `DECK: ${gs.my_deck_count}`;
+
+    const ti = document.getElementById('turn-indicator');
+    if (gs.is_my_turn) {
+        ti.textContent = 'YOUR TURN';
+        ti.style.color = 'var(--gold)';
+    } else {
+        ti.textContent = "OPP'S TURN";
+        ti.style.color = 'var(--outcome-light)';
+    }
+}
+
+function updateLP() {
+    if (!gs) return;
+    document.getElementById('player-lp').textContent = gs.my_lp;
+    document.getElementById('opp-lp').textContent = gs.opp_lp;
+    document.getElementById('player-lp-bar').style.width = `${Math.max(0, (gs.my_lp / 8000) * 100)}%`;
+    document.getElementById('opp-lp-bar').style.width = `${Math.max(0, (gs.opp_lp / 8000) * 100)}%`;
+
+    // Direct attack LP targeting
+    if (uiPhase === 'attack_select_target' && !gs.opp_monsters.some(m => m !== null)) {
+        document.querySelector('#opp-lp').parentElement.classList.add('lp-target');
+        document.querySelector('#opp-lp').parentElement.onclick = () => selectAttackTarget('lp', null);
+    } else {
+        document.querySelector('#opp-lp').parentElement.classList.remove('lp-target');
+        document.querySelector('#opp-lp').parentElement.onclick = null;
+    }
+}
+
+function updateButtons() {
+    if (!gs) return;
+    const isMyTurn = gs.is_my_turn && !gameOver;
+    const isIdle = uiPhase === 'idle';
+
+    const canSummon = gs.my_constructs.some(c => c?.type === 'predictor') &&
+                      gs.my_constructs.some(c => c?.type === 'outcome') &&
+                      !gs.my_summoned && gs.my_monsters.some(m => m === null);
+    const canAttack = gs.my_monsters.some(m => m && m.attacksMade < m.maxAttacks);
+    const canMeta = getMetaTarget() !== null;
+
+    document.getElementById('btn-summon').disabled = !(isMyTurn && canSummon && isIdle);
+    document.getElementById('btn-meta').disabled = !(isMyTurn && canMeta && isIdle);
+    document.getElementById('btn-attack').disabled = !(isMyTurn && canAttack && isIdle);
+    document.getElementById('btn-end').disabled = !(isMyTurn && isIdle);
+    document.getElementById('btn-cancel').style.display = (uiPhase !== 'idle' && isMyTurn) ? 'block' : 'none';
+}
+
+function getMetaTarget() {
+    if (!gs) return null;
+    const m = gs.my_monsters;
+    if (m[0] && m[1] && m[2]) {
+        if (m[0].predId === m[1].predId && m[1].predId === m[2].predId && m[0].predId !== 'META') return true;
+        if (m[0].outId === m[1].outId && m[1].outId === m[2].outId && m[0].outId !== 'META') return true;
+    }
+    return null;
+}
+
+// ==================== VISUAL FX ====================
+function triggerScreenShake() {
+    const c = document.getElementById('game-container');
+    c.classList.remove('shake-anim'); void c.offsetWidth; c.classList.add('shake-anim');
+}
+function triggerFlash(type) {
+    const o = document.getElementById('flash-overlay');
+    o.className = ''; void o.offsetWidth; o.classList.add(`flash-${type}`);
+}
+function addLog(msg, type = '') {
+    const logEl = document.getElementById('game-log');
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+    // Replace P1/P2 with YOU/OPP
+    let display = msg;
+    display = display.replace(new RegExp(`P${session.playerNum}`, 'g'), 'You');
+    display = display.replace(new RegExp(`P${session.playerNum === 1 ? 2 : 1}`, 'g'), 'Opponent');
+    entry.innerHTML = display;
+    logEl.appendChild(entry);
+    logEl.scrollTop = logEl.scrollHeight;
+}
+function showDamageNumber(elId, amount) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const dmg = document.createElement('div');
+    dmg.className = 'damage-number'; dmg.textContent = `-${amount}`;
+    dmg.style.left = `${rect.left}px`; dmg.style.top = `${rect.top + 20}px`;
+    document.body.appendChild(dmg);
+    setTimeout(() => dmg.remove(), 1500);
+}
+
+// ==================== DICE ANIMATION ====================
+function showDiceRoll(roll, threshold, hit) {
+    return new Promise(resolve => {
+        const modal = document.getElementById('dice-modal');
+        const resultEl = document.getElementById('dice-result');
+        const textEl = document.getElementById('dice-text');
+        modal.style.display = 'block';
+        let frames = 0;
+        const anim = setInterval(() => {
+            resultEl.textContent = Math.floor(Math.random() * 20) + 1;
+            frames++;
+            if (frames > 15) {
+                clearInterval(anim);
+                resultEl.textContent = roll;
+                if (hit) {
+                    resultEl.style.color = '#50fa7b';
+                    textEl.textContent = `Target: ≤ ${threshold} | P < .05 (SIGNIFICANT!)`;
+                } else {
+                    resultEl.style.color = '#ff5555';
+                    textEl.textContent = `Target: ≤ ${threshold} | P > .05 (TYPE II ERROR!)`;
+                }
+                setTimeout(() => {
+                    modal.style.display = 'none';
+                    resultEl.style.color = '#fff';
+                    resolve();
+                }, 1800);
+            }
+        }, 50);
+    });
+}
+
+// ==================== TOOLTIPS ====================
+function showCardTooltip(e, card) {
+    const tip = document.getElementById('tooltip');
+    if (card.isItem) {
+        let valString = '';
+        if (card.type === 'predictor' && TRUE_VALIDITY[card.constructId]) {
+            valString = Object.keys(TRUE_VALIDITY[card.constructId])
+                .map(o => `→ ${CONSTRUCTS[o]?.short||o}: ρ = ${TRUE_VALIDITY[card.constructId][o].toFixed(2)}`).join('<br>');
+        } else if (card.type === 'outcome') {
+            valString = Object.keys(TRUE_VALIDITY)
+                .filter(p => TRUE_VALIDITY[p][card.constructId] !== undefined)
+                .map(p => `${CONSTRUCTS[p]?.short||p} →: ρ = ${TRUE_VALIDITY[p][card.constructId].toFixed(2)}`).join('<br>');
+        }
+        tip.innerHTML = `<div style="color:var(--gold);">${card.construct}</div><div>Item: ${card.indicator}</div><div>Avg r̄ = ${card.avgR.toFixed(2)}</div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="color:var(--gold);">True Validities:</div>${valString}`;
+    } else {
+        tip.innerHTML = `<div style="color:var(--gold);">${card.name}</div><div style="color:var(--gray);">${card.type.toUpperCase()}</div><div style="margin-top:0.5vmin;">${card.desc}</div>`;
+    }
+    positionTooltip(e, tip);
+}
+function showConstructTooltip(e, c) {
+    const tip = document.getElementById('tooltip');
+    const k = c.cards.length;
+    const rel = spearmanBrown(k, c.cards[0].avgR);
+    tip.innerHTML = `<div style="color:var(--gold);">${c.cards[0].construct}</div><div>Items: ${k}</div><div style="color:var(--green);">Reliability α = ${rel.toFixed(3)}</div>`;
+    positionTooltip(e, tip);
+}
+function showMonsterTooltip(e, m) {
+    const tip = document.getElementById('tooltip');
+    let pwrPercent = Math.floor(m.power * 100);
+    let targetD20 = Math.max(1, Math.round(m.power * 20));
+    tip.innerHTML = `<div style="color:var(--gold);">${m.name}</div><div style="color:#ff6644; font-size:1.5vmin;">ATK: ${m.atk}</div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="color:var(--gray);">r_true (ρ) = ${m.rTrue.toFixed(2)}</div><div style="color:var(--gray);">r_obs = ${m.rObs.toFixed(3)}</div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="color:var(--resource);">Sample Size (N) = ${m.n}</div><div style="color:var(--green);">Power (1-β) = ${pwrPercent}%</div><div style="color:var(--white); font-size:0.8vmin;">Needs ≤ ${targetD20} on D20 to Hit</div>`;
+    positionTooltip(e, tip);
+}
+function positionTooltip(e, tip) {
+    tip.classList.add('active');
+    const rect = tip.getBoundingClientRect();
+    let x = e.clientX + 15, y = e.clientY + 15;
+    if (x + rect.width > window.innerWidth) x = e.clientX - rect.width - 15;
+    if (y + rect.height > window.innerHeight) y = e.clientY - rect.height - 15;
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+}
+function hideTooltip() { document.getElementById('tooltip').classList.remove('active'); }
+
+// ==================== ACTIONS ====================
+function clearSlotHighlights() {
+    for (let i = 0; i < 3; i++) {
+        document.getElementById(`player-construct-${i}`).classList.remove('highlight', 'spell-target', 'resource-target');
+        document.getElementById(`opp-construct-${i}`).classList.remove('spell-target', 'resource-target');
+        document.getElementById(`player-monster-${i}`).classList.remove('spell-target', 'resource-target');
+        document.getElementById(`opp-monster-${i}`).classList.remove('attack-target', 'spell-target');
+    }
+}
+
+function cancelAction() {
+    uiPhase = 'idle';
+    selectedHandCard = null;
+    attackingMonsterSlot = null;
+    clearSlotHighlights();
+    renderAll();
+}
+
+function selectHandCard(idx) {
+    if (!gs?.is_my_turn || gameOver || uiPhase.startsWith('attack') || uiPhase.startsWith('summon')) return;
+    if (selectedHandCard === idx) { cancelAction(); return; }
+
+    selectedHandCard = idx;
+    const card = gs.my_hand[idx];
+    clearSlotHighlights();
+
+    if (card.isItem) {
+        uiPhase = 'place';
+        for (let i = 0; i < 3; i++) {
+            const existing = gs.my_constructs[i];
+            if (!existing || (existing.constructId === card.constructId && existing.cards.length < 3)) {
+                document.getElementById(`player-construct-${i}`).classList.add('highlight');
+            }
+        }
+    } else {
+        if (card.id === 'missing_data') {
+            uiPhase = 'spell_target_missing_data';
+        } else if (card.id === 'range_restrict') {
+            uiPhase = 'spell_target_range';
+        } else if (card.id === 'correction') {
+            uiPhase = 'spell_target_correct';
+        } else if (card.id === 'sample_size') {
+            uiPhase = 'spell_target_sample_size';
+        } else if (card.id === 'replication') {
+            uiPhase = 'spell_target_replication';
+        }
+    }
+    renderAll();
+}
+
+// --- Construct placement ---
+async function onConstructSlotClick(slotIdx) {
+    if (!gs?.is_my_turn || gameOver) return;
+
+    if (uiPhase === 'summon_select_pred') {
+        if (gs.my_constructs[slotIdx]?.type === 'predictor') {
+            summonPredSlot = slotIdx;
+            uiPhase = 'summon_select_out';
+            clearSlotHighlights();
+            for (let i = 0; i < 3; i++) if (gs.my_constructs[i]?.type === 'outcome') document.getElementById(`player-construct-${i}`).classList.add('highlight');
+            renderAll();
+        }
+        return;
+    }
+    if (uiPhase === 'summon_select_out') {
+        if (gs.my_constructs[slotIdx]?.type === 'outcome') {
+            await submitMove({ type: 'summon', pred_slot: summonPredSlot, out_slot: slotIdx });
+            uiPhase = 'idle';
+            summonPredSlot = null;
+            clearSlotHighlights();
+        }
+        return;
+    }
+
+    if (uiPhase !== 'place' || selectedHandCard === null) return;
+    const card = gs.my_hand[selectedHandCard];
+    if (!card.isItem) return;
+
+    const existing = gs.my_constructs[slotIdx];
+    if (existing && existing.constructId !== card.constructId) return;
+    if (existing && existing.cards.length >= 3) return;
+
+    await submitMove({ type: 'place_card', hand_index: selectedHandCard, slot: slotIdx });
+    selectedHandCard = null;
+    uiPhase = 'idle';
+    clearSlotHighlights();
+}
+
+// --- Summon ---
+function startSummon() {
+    if (!gs?.is_my_turn || gs.my_summoned) return;
+    selectedHandCard = null;
+    uiPhase = 'summon_select_pred';
+    clearSlotHighlights();
+    for (let i = 0; i < 3; i++) if (gs.my_constructs[i]?.type === 'predictor') document.getElementById(`player-construct-${i}`).classList.add('highlight');
+    renderAll();
+}
+
+// --- Spells ---
+async function executeMissingData(slotIdx, owner, targetType) {
+    if (uiPhase !== 'spell_target_missing_data') return;
+    await submitMove({
+        type: 'play_spell', hand_index: selectedHandCard,
+        target_owner: owner === 'player' ? 'me' : 'opp',
+        target_type: targetType === 'construct' ? 'construct' : 'monster',
+        target_slot: slotIdx
+    });
+    triggerFlash('heal');
+    selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
+}
+
+async function executeRangeRestrict(slotIdx) {
+    if (uiPhase !== 'spell_target_range') return;
+    await submitMove({ type: 'play_spell', hand_index: selectedHandCard, target_owner: 'opp', target_type: 'monster', target_slot: slotIdx });
+    triggerFlash('heal');
+    selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
+}
+
+async function executeCorrection(slotIdx) {
+    if (uiPhase !== 'spell_target_correct') return;
+    await submitMove({ type: 'play_spell', hand_index: selectedHandCard, target_owner: 'me', target_type: 'monster', target_slot: slotIdx });
+    triggerFlash('heal');
+    selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
+}
+
+async function executeSampleSize(slotIdx) {
+    if (uiPhase !== 'spell_target_sample_size') return;
+    await submitMove({ type: 'play_spell', hand_index: selectedHandCard, target_owner: 'me', target_type: 'monster', target_slot: slotIdx });
+    triggerFlash('heal');
+    selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
+}
+
+async function executeReplication(slotIdx) {
+    if (uiPhase !== 'spell_target_replication') return;
+    await submitMove({ type: 'play_spell', hand_index: selectedHandCard, target_owner: 'me', target_type: 'monster', target_slot: slotIdx });
+    triggerFlash('heal');
+    selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
+}
+
+function onMonsterSlotClick(slotIdx) {
+    if (uiPhase === 'spell_target_correct') executeCorrection(slotIdx);
+    if (uiPhase === 'spell_target_sample_size') executeSampleSize(slotIdx);
+    if (uiPhase === 'spell_target_replication') executeReplication(slotIdx);
+}
+
+// --- Attack ---
+function startAttack() {
+    if (!gs?.is_my_turn || gameOver) return;
+    selectedHandCard = null;
+    uiPhase = 'attack_select_monster';
+    renderAll();
+}
+
+function selectAttackingMonster(slotIdx) {
+    const m = gs.my_monsters[slotIdx];
+    if (!m || m.attacksMade >= m.maxAttacks) return;
+    attackingMonsterSlot = slotIdx;
+
+    if (gs.opp_monsters.some(m => m !== null)) {
+        uiPhase = 'attack_select_target';
+        renderAll();
+    } else {
+        executeAttack('lp', null);
+    }
+}
+
+async function selectAttackTarget(type, targetSlot) {
+    await executeAttack(type, targetSlot);
+}
+
+async function executeAttack(targetType, targetSlot) {
+    uiPhase = 'rolling';
+    clearSlotHighlights();
+    renderAll();
+
+    // Pause polling so it doesn't reveal results during animation
+    clearInterval(session.pollTimer);
+
+    // Submit move but DON'T update state or render yet
+    const res = await submitMove({
+        type: 'attack',
+        attacker_slot: attackingMonsterSlot,
+        target_type: targetType,
+        target_slot: targetSlot
+    }, true); // skipRender = true
+
+    if (res.move_result) {
+        const mr = res.move_result;
+
+        // Play the full dice animation FIRST
+        await showDiceRoll(mr.roll, mr.threshold, mr.hit);
+
+        // NOW apply the state update after animation is done
+        if (res.state) {
+            gs = res.state;
+            if (gs.log && gs.log.length > lastLogCount) {
+                for (let i = lastLogCount; i < gs.log.length; i++) {
+                    addLog(gs.log[i].msg, gs.log[i].type);
+                }
+                lastLogCount = gs.log.length;
+            }
+        }
+
+        // Now show visual effects
+        if (mr.hit) {
+            triggerScreenShake();
+            triggerFlash('attack');
+            if (mr.attack_data?.damage) {
+                const targetIsOpp = mr.attack_data.outcome !== 'lose';
+                showDamageNumber(targetIsOpp ? 'opp-lp' : 'player-lp', mr.attack_data.damage);
+            }
+        } else {
+            triggerFlash('error');
+        }
+
+        // Now render the updated state
+        renderAll();
+
+        // Check for game over after rendering
+        if (gs.status === 'finished' && !gameOver) {
+            gameOver = true;
+            endGame(gs.i_won);
+        }
+    }
+
+    attackingMonsterSlot = null;
+    uiPhase = 'idle';
+    clearSlotHighlights();
+
+    // Resume polling
+    if (!gameOver) {
+        session.pollTimer = setInterval(pollNow, 2000);
+    }
+}
+
+// --- Meta ---
+async function doMeta() {
+    uiPhase = 'idle';
+    const res = await submitMove({ type: 'meta' });
+    if (res.move_result?.meta) {
+        triggerScreenShake();
+        triggerFlash('meta');
+    }
+    clearSlotHighlights();
+}
+
+// --- End Turn ---
+async function doEndTurn() {
+    if (!gs?.is_my_turn) return;
+    uiPhase = 'idle';
+    selectedHandCard = null;
+    clearSlotHighlights();
+    await submitMove({ type: 'end_turn' });
+}
+
+// ==================== END GAME ====================
+function endGame(playerWon) {
+    gameOver = true;
+    clearInterval(session.pollTimer);
+    document.getElementById('end-screen').classList.add('active');
+    document.getElementById('end-title').innerHTML = playerWon
+        ? '<span style="color:var(--gold)">VICTORY!</span>'
+        : '<span style="color:var(--outcome-light)">DEFEAT!</span>';
+    document.getElementById('end-message').textContent = playerWon
+        ? "Your highly reliable measures captured true validity!"
+        : "Measurement error attenuated your validity into oblivion.";
+}
+
+function showTutorial() { document.getElementById('tutorial-modal').classList.add('active'); }
+function closeTutorial() { document.getElementById('tutorial-modal').classList.remove('active'); }
+
+showMenu('main');
+updateAIDifficultyUI();
+</script>
+</body>
+</html>
