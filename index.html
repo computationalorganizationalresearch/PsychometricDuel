@@ -149,7 +149,7 @@
         color: var(--white);
     }
 
-    /* ===== TUTORIAL MODAL ===== */
+    /* ===== TUTORIAL / MULLIGAN MODALS ===== */
     .modal-overlay {
         position: absolute; inset: 0; background: rgba(0,0,0,0.9);
         display: none; align-items: center; justify-content: center;
@@ -164,8 +164,71 @@
     .modal-box h3 { color: var(--predictor-light); font-size: 1.8cqmin; margin: 2cqmin 0 1cqmin; }
 
     /* ===== GAME SCREEN ===== */
-    #game-screen { display: none; height: 100%; flex-direction: column; width: 100%;}
+    #game-screen { display: none; height: 100%; flex-direction: column; width: 100%; position: relative; }
     #game-screen.active { display: flex; }
+
+    .persistent-help-link {
+        position: absolute;
+        top: 8.8%;
+        right: 1.2cqmin;
+        z-index: 120;
+        font-family: 'Press Start 2P', monospace;
+        font-size: 0.95cqmin;
+        color: var(--gold);
+        background: rgba(10,10,26,0.55);
+        border: 0.18cqmin solid rgba(255,204,0,0.35);
+        padding: 0.6cqmin 1cqmin;
+        cursor: pointer;
+        opacity: 0.62;
+        transition: opacity 0.12s, border-color 0.12s, background 0.12s;
+    }
+    .persistent-help-link:hover {
+        opacity: 1;
+        border-color: var(--gold);
+        background: rgba(10,10,26,0.9);
+    }
+
+    #mulligan-modal .modal-box {
+        width: min(115cqmin, 96%);
+        max-width: none;
+    }
+    .mulligan-grid {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 1cqmin;
+        margin-top: 1.5cqmin;
+    }
+    .mulligan-card-wrap {
+        position: relative;
+        padding: 0.3cqmin;
+        border: 0.2cqmin solid transparent;
+        background: rgba(255,255,255,0.02);
+        cursor: pointer;
+    }
+    .mulligan-card-wrap.selected {
+        border-color: var(--outcome-light);
+        background: rgba(204,34,68,0.12);
+        box-shadow: 0 0 1cqmin rgba(238,68,102,0.22);
+    }
+    .mulligan-card-wrap::after {
+        content: 'REPLACE';
+        position: absolute;
+        left: 50%;
+        bottom: -1.2cqmin;
+        transform: translateX(-50%);
+        font-size: 0.75cqmin;
+        color: var(--outcome-light);
+        opacity: 0;
+        pointer-events: none;
+    }
+    .mulligan-card-wrap.selected::after { opacity: 1; }
+    .mulligan-subtext {
+        color: var(--gray);
+        font-size: 1.1cqmin;
+        line-height: 1.6;
+        margin-top: 0.8cqmin;
+    }
 
     .top-bar {
         display: flex; justify-content: space-between; align-items: center;
@@ -328,7 +391,7 @@
         font-size: 1.2vmin; line-height: 1.8; z-index: 5000; width: auto; max-width: 45vmin; pointer-events: none;
     }
     .tooltip.active { display: block; }
-    .card-back { width: 4.5cqmin; height: 6cqmin; background: repeating-linear-gradient(45deg, #1a1a3a, #1a1a3a 0.5cqmin, #222244 0.5cqmin, #222244 1cqmin); border: 0.2cqmin solid var(--gray); flex-shrink: 0;}
+    .card-back { width: 4.5cqmin; height: 6cqmin; background: repeating-linear-gradient(45deg, #1a1a3a, #1a1a3a 0.5cqmin, #222244 0.5cqmin, #222244 1cqmin); border: 0.2cqmin solid var(--gray); flex-shrink: 0; display:flex; align-items:center; justify-content:center;}
 
     .end-screen {
         position: absolute; inset: 0; background: rgba(0,0,0,0.95);
@@ -421,6 +484,7 @@
             <h3>1. Objective (What “Winning” Means)</h3>
             <p>Your goal is to reduce your opponent’s LP (Life Points) from <strong>8000 to 0</strong>. You do this by summoning monsters from <em>Predictor × Outcome</em> construct pairings and attacking.</p>
             <p>Think like a psychometrician: stronger measurement quality (reliability) and larger samples (N) help you estimate effects more accurately and make successful attacks more likely.</p>
+            <p><strong>Opening setup:</strong> Each player begins with a <strong>10-card hand</strong> and gets a <strong>one-time mulligan</strong> (choose any opening cards to replace before turn 1).</p>
 
             <h3>2. Card Types (What Each Color Does)</h3>
             <p>
@@ -486,7 +550,25 @@
             5) End turn
             </p>
             <p><strong>Beginner tip:</strong> Don’t rush attacks. A more reliable construct stack + larger N usually produces better outcomes than a fast low-power attack.</p>
-<button class="how-to-btn" style="display:block; margin: 2cqmin auto 0;" onclick="closeTutorial()">I UNDERSTAND</button>
+            <button class="how-to-btn" style="display:block; margin: 2cqmin auto 0;" onclick="closeTutorial()">I UNDERSTAND</button>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="mulligan-modal">
+        <div class="modal-box">
+            <h2>OPENING MULLIGAN</h2>
+            <p>Select any number of cards to replace, then confirm. Replaced cards are shuffled into your deck and redrawn (Hearthstone-style).</p>
+            <p class="mulligan-subtext" id="mulligan-status">Select cards to replace.</p>
+
+            <div class="mulligan-grid" id="mulligan-hand"></div>
+
+            <div style="display:flex; gap:1cqmin; justify-content:center; margin-top: 2.5cqmin; flex-wrap:wrap;">
+                <button class="how-to-btn" style="margin-top:0;" onclick="keepOpeningHand()">KEEP ALL</button>
+                <button class="start-btn" style="font-size:1.2cqmin; padding:1.4cqmin 2cqmin;" onclick="confirmMulligan()">
+                    CONFIRM MULLIGAN (<span id="mulligan-count">0</span>)
+                </button>
+                <button class="how-to-btn" style="margin-top:0;" onclick="showTutorial()">HOW TO PLAY</button>
+            </div>
         </div>
     </div>
 
@@ -505,6 +587,8 @@
                 <span class="lp-label">YOUR LP</span>
             </div>
         </div>
+
+        <button class="persistent-help-link" onclick="showTutorial()">HOW TO PLAY</button>
 
         <div class="game-board">
             <div class="opponent-side">
@@ -570,6 +654,8 @@
 <script>
 // ==================== CONFIG ====================
 const API_URL = 'api.php'; // Change to your API endpoint
+const MAX_HAND_SIZE = 10;
+const STARTING_HAND_SIZE = 10;
 
 // ==================== PSYCHOMETRICS DATA (for tooltips) ====================
 const CONSTRUCTS = {
@@ -711,7 +797,16 @@ const LOCAL_SPELL_CARDS = {
     replication: { id: 'replication', type: 'spell', icon: '⟳', name: 'Replication', desc: 'Target your monster. Grants an extra attack and preserves N for one attack.' },
     missing_data: { id: 'missing_data', type: 'spell', icon: '∅', name: 'Missing Data', desc: 'Destroy any card on the field.' },
     range_restrict: { id: 'range_restrict', type: 'trap', icon: '↔', name: 'Range Restriction', desc: 'Target enemy monster. Halve ATK.' },
-    correction: { id: 'correction', type: 'resource', icon: '↺', name: 'Correction', desc: 'Target your monster. Restore ATK to max.' }
+    correction: { id: 'correction', type: 'resource', icon: '↺', name: 'Correction', desc: 'Target your monster. Restore ATK to max.' },
+
+    // New psychometrically relevant support / disruption cards
+    bootstrapping: { id: 'bootstrapping', type: 'spell', icon: '🧮', name: 'Bootstrapping', desc: 'Target your monster. +60 N via resampling support.' },
+    cross_validate: { id: 'cross_validate', type: 'spell', icon: '⧉', name: 'Cross-Validation', desc: 'Target your monster. +40 N and grant an extra attack window.' },
+    item_analysis: { id: 'item_analysis', type: 'spell', icon: '🧩', name: 'Item Analysis', desc: 'Target your construct stack. Add one matching item (max 3) to improve reliability.' },
+
+    ceiling_effect: { id: 'ceiling_effect', type: 'trap', icon: '⌈⌉', name: 'Ceiling Effect', desc: 'Target enemy monster. Compress variance by resetting N to pilot levels.' },
+    construct_drift: { id: 'construct_drift', type: 'trap', icon: '↘', name: 'Construct Drift', desc: 'Target enemy construct. Remove one stacked item (or destroy stack if only one).' },
+    criterion_contam: { id: 'criterion_contam', type: 'trap', icon: '⚠', name: 'Criterion Contam.', desc: 'Target enemy monster. Reduce N by 80, lowering power.' }
 };
 
 function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
@@ -829,7 +924,12 @@ function buildStartingDeck() {
     const counts = {
         cog_ability: 4, conscient: 4, struct_int: 4, work_sample: 4,
         job_perf: 4, turnover: 4, job_sat: 4, ocb: 4,
-        sample_size: 6, replication: 4, missing_data: 3, range_restrict: 4, correction: 3
+
+        sample_size: 5, replication: 3, missing_data: 3, range_restrict: 4, correction: 3,
+
+        // New additions
+        bootstrapping: 4, cross_validate: 3, item_analysis: 3,
+        ceiling_effect: 3, construct_drift: 3, criterion_contam: 3
     };
     Object.entries(counts).forEach(([id, n]) => {
         for (let i = 0; i < n; i++) {
@@ -841,6 +941,7 @@ function buildStartingDeck() {
 }
 function drawCards(player, n) {
     for (let i = 0; i < n; i++) {
+        if (player.hand.length >= MAX_HAND_SIZE) break;
         if (player.deck.length > 0) player.hand.push(player.deck.pop());
     }
 }
@@ -882,7 +983,6 @@ function buildMonster(predStack, outStack) {
         power: 0.1,
         attacksMade: 0,
         maxAttacks: 1,
-        summoningSick: true,
         hasReplication: false,
         rangeRestricted: false,
         isMeta: false
@@ -910,7 +1010,6 @@ function buildMetaMonster(monsters) {
         power: 0.97,
         attacksMade: 0,
         maxAttacks: 2,
-        summoningSick: true,
         hasReplication: false,
         rangeRestricted: false,
         isMeta: true
@@ -945,32 +1044,109 @@ function startTurnFor(pid) {
     const p = localGame.players[pid];
     p.summoned = false;
     drawCards(p, 1);
-    p.monsters.forEach(m => {
-        if (m) {
-            m.attacksMade = 0;
-            m.maxAttacks = m.isMeta ? 2 : (m.hasReplication ? 2 : 1);
-            m.summoningSick = false;
-        }
-    });
+    p.monsters.forEach(m => { if (m) { m.attacksMade = 0; m.maxAttacks = m.isMeta ? 2 : (m.hasReplication ? 2 : 1); } });
     logLocal(`P${pid} draws a card.`, 'info-log');
     maybeDeckOutDamage(p, pid);
 }
+
+function chooseAIMulliganIndices(hand) {
+    const replace = [];
+    const replaceSet = new Set();
+
+    const mark = (i) => { if (!replaceSet.has(i)) { replaceSet.add(i); replace.push(i); } };
+
+    // Toss situational/reactive cards in opening hand more often
+    hand.forEach((c, i) => {
+        if (!c.isItem && ['missing_data', 'range_restrict', 'construct_drift', 'criterion_contam', 'correction'].includes(c.id)) {
+            mark(i);
+        }
+    });
+
+    // Trim duplicates beyond 2 of the same construct in opener
+    const byConstruct = {};
+    hand.forEach((c, i) => {
+        if (!c.isItem) return;
+        byConstruct[c.constructId] ||= [];
+        byConstruct[c.constructId].push(i);
+    });
+    Object.values(byConstruct).forEach(arr => {
+        while (arr.length > 2) mark(arr.pop());
+    });
+
+    // If still missing predictor or outcome after provisional keeps, mulligan more non-items to dig
+    const keptHasPred = hand.some((c, i) => c.isItem && c.type === 'predictor' && !replaceSet.has(i));
+    const keptHasOut  = hand.some((c, i) => c.isItem && c.type === 'outcome' && !replaceSet.has(i));
+    if (!keptHasPred || !keptHasOut) {
+        hand.forEach((c, i) => {
+            if (replace.length >= 5) return;
+            if (!c.isItem && !replaceSet.has(i)) mark(i);
+        });
+    }
+
+    return replace.slice(0, 5);
+}
+
+function localMulligan(pid, indices = []) {
+    if (!localGame || localGame.status === 'finished') return { success: false, message: 'Game not active' };
+    if (!localGame.mulligan?.phase) return { success: false, message: 'Mulligan phase is over' };
+    if (localGame.mulligan.done?.[pid]) return { success: false, message: 'Mulligan already completed' };
+
+    const p = localGame.players[pid];
+    const uniq = [...new Set(indices)]
+        .filter(i => Number.isInteger(i) && i >= 0 && i < p.hand.length)
+        .sort((a, b) => b - a);
+
+    const replacedCards = [];
+    uniq.forEach(i => {
+        const [card] = p.hand.splice(i, 1);
+        if (card) replacedCards.push(card);
+    });
+
+    if (replacedCards.length) {
+        p.deck.push(...replacedCards.map(c => deepClone(c)));
+        shuffle(p.deck);
+        drawCards(p, replacedCards.length);
+    }
+
+    localGame.mulligan.done[pid] = true;
+    logLocal(`P${pid} completes mulligan (${replacedCards.length} card${replacedCards.length === 1 ? '' : 's'} replaced).`, 'info-log');
+
+    if (localGame.mulligan.done[1] && localGame.mulligan.done[2]) {
+        localGame.mulligan.phase = false;
+        logLocal(`Mulligans complete. P1 begins the duel.`, 'meta-log');
+    }
+
+    return { success: true };
+}
+
+async function localSubmitMulligan(indices) {
+    const out = localMulligan(1, indices);
+    if (!out.success) return { success: false, message: out.message };
+    return { success: true, state: projectStateForPlayer(1) };
+}
+
 function initLocalGame() {
     localGame = {
         status: 'active',
         currentPlayer: 1,
         winner: null,
         log: [],
+        mulligan: { phase: true, done: { 1: false, 2: false } },
         players: {
             1: { lp: 8000, deck: buildStartingDeck(), hand: [], constructs: [null, null, null], monsters: [null, null, null], summoned: false },
             2: { lp: 8000, deck: buildStartingDeck(), hand: [], constructs: [null, null, null], monsters: [null, null, null], summoned: false }
         }
     };
-    drawCards(localGame.players[1], 5);
-    drawCards(localGame.players[2], 5);
+
+    drawCards(localGame.players[1], STARTING_HAND_SIZE);
+    drawCards(localGame.players[2], STARTING_HAND_SIZE);
+
+    const aiMull = chooseAIMulliganIndices(localGame.players[2].hand);
+    localMulligan(2, aiMull);
+
     const aiProfile = getAIProfile();
     logLocal(`Single-player mode started. You are P1. ${aiProfile.label} AI is P2.`, 'meta-log');
-    logLocal('P1 begins the duel.', 'info-log');
+    logLocal(`Opening hands drawn (${STARTING_HAND_SIZE}). Select any cards to mulligan before turn 1.`, 'info-log');
 }
 function projectStateForPlayer(pid) {
     const me = localGame.players[pid];
@@ -989,6 +1165,8 @@ function projectStateForPlayer(pid) {
         my_monsters: deepClone(me.monsters),
         opp_monsters: deepClone(opp.monsters),
         my_summoned: me.summoned,
+        mulligan_pending: !!(localGame.mulligan?.phase && !localGame.mulligan.done[pid]),
+        mulligan_done: !!(localGame.mulligan?.done?.[pid]),
         log: deepClone(localGame.log)
     };
 }
@@ -1024,6 +1202,7 @@ function applyLocalMove(pid, move) {
     if (!localGame) return { success: false, message: 'Local game not initialized' };
     if (localGame.status === 'finished') return { success: false, message: 'Game already finished' };
     if (localGame.currentPlayer !== pid) return { success: false, message: 'Not your turn' };
+    if (localGame.mulligan?.phase) return { success: false, message: 'Complete mulligan first' };
 
     const me = localGame.players[pid];
     const opp = localGame.players[pid === 1 ? 2 : 1];
@@ -1050,32 +1229,28 @@ function applyLocalMove(pid, move) {
     }
     else if (move.type === 'summon') {
         if (me.summoned) return { success: false, message: 'You can only summon once per turn' };
-    
+
         const mSlot = firstEmptySlot(me.monsters);
         if (mSlot === -1) return { success: false, message: 'No empty monster slot' };
-    
-        // Safety check: must use two different construct slots
+
         if (move.pred_slot === move.out_slot) {
             return { success: false, message: 'Predictor and Outcome must be different slots' };
         }
-    
+
         const pred = me.constructs[move.pred_slot];
         const out = me.constructs[move.out_slot];
-    
+
         if (!pred || pred.type !== 'predictor') return { success: false, message: 'Choose a predictor construct' };
         if (!out || out.type !== 'outcome') return { success: false, message: 'Choose an outcome construct' };
-    
-        // Build the monster FIRST (uses the construct stats)
+
         const monster = buildMonster(pred, out);
-    
-        // Consume the summon materials (remove construct stacks from field)
+
         me.constructs[move.pred_slot] = null;
         me.constructs[move.out_slot] = null;
-    
-        // Place summoned monster
+
         me.monsters[mSlot] = monster;
         me.summoned = true;
-    
+
         logLocal(
             `P${pid} summons ${monster.name} (ATK ${monster.atk}, PWR ${Math.floor(monster.power * 100)}%) by consuming construct materials.`,
             'formula-log'
@@ -1128,6 +1303,53 @@ function applyLocalMove(pid, move) {
             target.atk = target.baseAtk ?? target.atk;
             logLocal(`P${pid} applies Correction to ${target.name}. ATK restored to ${target.atk}.`, 'spell-log');
         }
+        else if (card.id === 'bootstrapping') {
+            if (move.target_type !== 'monster' || targetPlayer !== me) return { success: false, message: 'Bootstrapping must target your monster' };
+            target.n = clamp(target.n + 60, 20, 420);
+            if (!target.isMeta) refreshMonsterStats(target);
+            else target.power = clamp(0.9 + (target.n / 1200), 0.9, 0.99);
+            logLocal(`P${pid} plays Bootstrapping on ${target.name}. N increases to ${target.n}.`, 'spell-log');
+        }
+        else if (card.id === 'cross_validate') {
+            if (move.target_type !== 'monster' || targetPlayer !== me) return { success: false, message: 'Cross-Validation must target your monster' };
+            target.n = clamp(target.n + 40, 20, 420);
+            target.hasReplication = true;
+            target.maxAttacks = Math.max(target.maxAttacks, 2);
+            if (!target.isMeta) refreshMonsterStats(target);
+            else target.power = clamp(0.9 + (target.n / 1200), 0.9, 0.99);
+            logLocal(`P${pid} plays Cross-Validation on ${target.name}. +40 N and extra attack window granted.`, 'spell-log');
+        }
+        else if (card.id === 'item_analysis') {
+            if (move.target_type !== 'construct' || targetPlayer !== me) return { success: false, message: 'Item Analysis must target your construct stack' };
+            if (target.cards.length >= 3) return { success: false, message: 'Construct stack already at maximum size' };
+            target.cards.push(deepClone(target.cards[target.cards.length - 1]));
+            logLocal(`P${pid} plays Item Analysis on ${target.cards[0].construct}. Stack grows to ${target.cards.length}.`, 'spell-log');
+        }
+        else if (card.id === 'ceiling_effect') {
+            if (move.target_type !== 'monster' || targetPlayer !== opp) return { success: false, message: 'Ceiling Effect must target an enemy monster' };
+            target.n = 20;
+            if (!target.isMeta) refreshMonsterStats(target);
+            else target.power = clamp(0.9 + (target.n / 1200), 0.9, 0.99);
+            logLocal(`P${pid} applies Ceiling Effect to ${target.name}. N resets to pilot level (${target.n}).`, 'spell-log');
+        }
+        else if (card.id === 'construct_drift') {
+            if (move.target_type !== 'construct' || targetPlayer !== opp) return { success: false, message: 'Construct Drift must target an enemy construct' };
+            const driftedName = target.cards[0].construct;
+            if (target.cards.length > 1) {
+                target.cards.pop();
+                logLocal(`P${pid} applies Construct Drift to ${driftedName}. Enemy stack drops to ${target.cards.length}.`, 'spell-log');
+            } else {
+                targetArr[move.target_slot] = null;
+                logLocal(`P${pid} applies Construct Drift and collapses enemy ${driftedName} construct stack.`, 'spell-log');
+            }
+        }
+        else if (card.id === 'criterion_contam') {
+            if (move.target_type !== 'monster' || targetPlayer !== opp) return { success: false, message: 'Criterion Contamination must target an enemy monster' };
+            target.n = clamp(target.n - 80, 20, 420);
+            if (!target.isMeta) refreshMonsterStats(target);
+            else target.power = clamp(0.9 + (target.n / 1200), 0.9, 0.99);
+            logLocal(`P${pid} applies Criterion Contamination to ${target.name}. N reduced to ${target.n}.`, 'spell-log');
+        }
         else {
             return { success: false, message: 'Unknown card effect' };
         }
@@ -1135,7 +1357,6 @@ function applyLocalMove(pid, move) {
     else if (move.type === 'attack') {
         const attacker = me.monsters[move.attacker_slot];
         if (!attacker) return { success: false, message: 'No attacker in that slot' };
-        if (attacker.summoningSick) return { success: false, message: 'This monster cannot attack on the turn it was summoned' };
         if (attacker.attacksMade >= attacker.maxAttacks) return { success: false, message: 'This monster has no attacks left' };
 
         const threshold = clamp(Math.round(attacker.power * 20), 1, 20);
@@ -1226,7 +1447,6 @@ function aiPlaceItems(pid) {
                 let score = 0;
                 score += stack ? 8 + stack.cards.length * 3 : 5;
                 if (card.type === 'predictor') score += 1; else score += 1;
-                // Bonus if this stack can improve an existing monster family or future summon quality
                 const tempStack = stack ? { ...stack, cards: [...stack.cards, card] } : makeConstructStackFromCard(card);
                 if (card.type === 'predictor') {
                     p.constructs.forEach(os => { if (os && os.type === 'outcome') score += calcObservedValidity(tempStack, os) * 10; });
@@ -1252,6 +1472,7 @@ function aiUseSupport(pid) {
     let loop = 0;
     while (loop++ < ai.supportLoopCap) {
         let performed = false;
+
         // Correction on strongest debuffed own monster
         let cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'correction');
         if (cIdx !== -1) {
@@ -1280,7 +1501,7 @@ function aiUseSupport(pid) {
         }
         if (performed) continue;
 
-        // Missing Data on lethal-ish enemy monster or 3-stack construct
+        // Missing Data on lethal-ish enemy monster or stacked construct
         cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'missing_data');
         if (cIdx !== -1) {
             let targetMonster = -1, threat = 0;
@@ -1315,12 +1536,28 @@ function aiUseSupport(pid) {
         }
         if (performed) continue;
 
+        // Cross-Validation on strongest available attacker
+        cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'cross_validate');
+        if (cIdx !== -1) {
+            let target = -1, score = 0;
+            p.monsters.forEach((m, i) => {
+                if (!m || m.attacksMade >= m.maxAttacks) return;
+                const s = m.atk * m.power;
+                if (s > score) { score = s; target = i; }
+            });
+            if (target !== -1 && score >= ai.replicationThreshold * 0.9) {
+                applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'me', target_type: 'monster', target_slot: target });
+                acted = performed = true;
+            }
+        }
+        if (performed) continue;
+
         // Sample Size on strongest available attacker until decent power
         cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'sample_size');
         if (cIdx !== -1) {
             let target = -1, score = -1;
             p.monsters.forEach((m, i) => {
-                if (!m || m.summoningSick || m.attacksMade >= m.maxAttacks) return;
+                if (!m || m.attacksMade >= m.maxAttacks) return;
                 const s = m.atk * (1 - m.power);
                 if (s > score) { score = s; target = i; }
             });
@@ -1332,6 +1569,72 @@ function aiUseSupport(pid) {
                 }
             }
         }
+        if (performed) continue;
+
+        // Bootstrapping on strongest available attacker if power still low
+        cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'bootstrapping');
+        if (cIdx !== -1) {
+            let target = -1, score = -1;
+            p.monsters.forEach((m, i) => {
+                if (!m || m.attacksMade >= m.maxAttacks) return;
+                const s = m.atk * (1 - m.power);
+                if (s > score) { score = s; target = i; }
+            });
+            if (target !== -1) {
+                const m = p.monsters[target];
+                if (m.power < ai.samplePowerTarget) {
+                    applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'me', target_type: 'monster', target_slot: target });
+                    acted = performed = true;
+                }
+            }
+        }
+        if (performed) continue;
+
+        // Item Analysis on best own construct stack below cap
+        cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'item_analysis');
+        if (cIdx !== -1) {
+            let target = -1, best = -1;
+            p.constructs.forEach((cs, i) => {
+                if (!cs || cs.cards.length >= 3) return;
+                const score = cs.cards.length * 10 + cs.cards[0].avgR * 10;
+                if (score > best) { best = score; target = i; }
+            });
+            if (target !== -1) {
+                applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'me', target_type: 'construct', target_slot: target });
+                acted = performed = true;
+            }
+        }
+        if (performed) continue;
+
+        // Construct Drift on enemy's largest construct stack
+        cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'construct_drift');
+        if (cIdx !== -1) {
+            let target = -1, stackSize = 0;
+            enemy.constructs.forEach((cs, i) => {
+                if (cs && cs.cards.length > stackSize) { stackSize = cs.cards.length; target = i; }
+            });
+            if (target !== -1 && stackSize >= 2) {
+                applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'opp', target_type: 'construct', target_slot: target });
+                acted = performed = true;
+            }
+        }
+        if (performed) continue;
+
+        // Ceiling Effect / Criterion Contamination on highest threat enemy monster
+        cIdx = p.hand.findIndex(c => !c.isItem && (c.id === 'ceiling_effect' || c.id === 'criterion_contam'));
+        if (cIdx !== -1) {
+            let target = -1, threat = 0;
+            enemy.monsters.forEach((m, i) => {
+                if (!m) return;
+                const t = m.atk + m.power * 500;
+                if (t > threat) { threat = t; target = i; }
+            });
+            if (target !== -1) {
+                applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'opp', target_type: 'monster', target_slot: target });
+                acted = performed = true;
+            }
+        }
+
         if (!performed) break;
     }
     return acted;
@@ -1348,7 +1651,6 @@ function aiTryMeta(pid) {
     const p = localGame.players[pid];
     const ai = getAIProfile();
     if (!localCanMeta(p)) return false;
-    // use meta when it substantially upgrades strongest board presence
     const currentSum = p.monsters.reduce((s, m) => s + (m ? m.atk : 0), 0);
     const estMeta = finalizeMetaMonster(buildMetaMonster(p.monsters.filter(Boolean)));
     if (estMeta.atk >= Math.max(ai.metaMinAtk, currentSum * ai.metaUpgradeRatio) || p.monsters.filter(Boolean).length === 3) {
@@ -1392,11 +1694,10 @@ function aiBattlePhase(pid) {
     const p = localGame.players[pid];
     let guard = 0;
     while (guard++ < ai.battleGuard && localGame.status === 'active' && localGame.currentPlayer === pid) {
-        // Before each attack, top off best attacker with Sample Size if available
         aiUseSupport(pid);
         let bestSlot = -1, bestScore = -Infinity;
         p.monsters.forEach((m, i) => {
-            if (!m || m.summoningSick || m.attacksMade >= m.maxAttacks) return;
+            if (!m || m.attacksMade >= m.maxAttacks) return;
             let score = m.atk * m.power + (m.hasReplication ? 220 : 0);
             if (m.attacksMade === 0) score += 30;
             if (m.power >= 0.9) score += 40;
@@ -1412,7 +1713,6 @@ async function runSinglePlayerAI() {
     if (localGame.currentPlayer !== 2) return;
 
     const ai = getAIProfile();
-    // Small pause for UX so the player sees the turn switch before logs/actions resolve.
     await new Promise(r => setTimeout(r, ai.delayMs));
 
     const pid = 2;
@@ -1436,7 +1736,6 @@ async function runSinglePlayerAI() {
 async function localSubmitMove(move) {
     const out = applyLocalMove(1, move);
     if (!out.success) return { success: false, message: out.message };
-    // If player ended turn, execute the strong AI immediately before returning state.
     if (move.type === 'end_turn' && localGame.status === 'active') {
         await runSinglePlayerAI();
     }
@@ -1453,6 +1752,7 @@ function startSinglePlayer() {
     selectedHandCard = null;
     summonPredSlot = null;
     attackingMonsterSlot = null;
+    mulliganSelection = new Set();
     uiPhase = 'idle';
     initLocalGame();
     gs = projectStateForPlayer(1);
@@ -1477,6 +1777,7 @@ let summonPredSlot = null;
 let attackingMonsterSlot = null;
 let gameOver = false;
 let lastLogCount = 0;
+let mulliganSelection = new Set();
 
 // ==================== API CALLS ====================
 async function apiCall(body) {
@@ -1576,7 +1877,6 @@ async function pollNow() {
     if (!res.success) return;
     gs = res.state;
 
-    // Process new log entries
     if (gs.log && gs.log.length > lastLogCount) {
         for (let i = lastLogCount; i < gs.log.length; i++) {
             addLog(gs.log[i].msg, gs.log[i].type);
@@ -1584,7 +1884,6 @@ async function pollNow() {
         lastLogCount = gs.log.length;
     }
 
-    // Check game over
     if (gs.status === 'finished' && !gameOver) {
         gameOver = true;
         endGame(gs.i_won);
@@ -1612,7 +1911,6 @@ async function submitMove(move, skipRender = false) {
     if (!skipRender) {
         gs = res.state;
 
-        // Process new logs
         if (gs.log && gs.log.length > lastLogCount) {
             for (let i = lastLogCount; i < gs.log.length; i++) {
                 addLog(gs.log[i].msg, gs.log[i].type);
@@ -1666,6 +1964,12 @@ function renderConstructSlot(slotIdx, owner) {
     if (uiPhase === 'spell_target_missing_data' && c) {
         slot.classList.add('spell-target');
         slot.onclick = () => executeMissingData(slotIdx, owner, 'construct');
+    } else if (uiPhase === 'spell_target_item_analysis' && owner === 'player' && c && c.cards.length < 3) {
+        slot.classList.add('spell-target');
+        slot.onclick = () => executeItemAnalysis(slotIdx);
+    } else if (uiPhase === 'spell_target_construct_drift' && owner === 'opp' && c) {
+        slot.classList.add('spell-target');
+        slot.onclick = () => executeConstructDrift(slotIdx);
     } else {
         slot.onclick = owner === 'player' ? () => onConstructSlotClick(slotIdx) : null;
     }
@@ -1702,12 +2006,24 @@ function renderMonsterSlot(slotIdx, owner) {
     if (uiPhase === 'spell_target_range' && owner === 'opp' && m) {
         slot.classList.add('spell-target');
         slot.onclick = () => executeRangeRestrict(slotIdx);
+    } else if (uiPhase === 'spell_target_ceiling_effect' && owner === 'opp' && m) {
+        slot.classList.add('spell-target');
+        slot.onclick = () => executeCeilingEffect(slotIdx);
+    } else if (uiPhase === 'spell_target_criterion_contam' && owner === 'opp' && m) {
+        slot.classList.add('spell-target');
+        slot.onclick = () => executeCriterionContam(slotIdx);
     } else if (uiPhase === 'spell_target_correct' && owner === 'player' && m && !m.isMeta) {
         slot.classList.add('spell-target');
         slot.onclick = () => executeCorrection(slotIdx);
     } else if (uiPhase === 'spell_target_sample_size' && owner === 'player' && m) {
         slot.classList.add('resource-target');
         slot.onclick = () => executeSampleSize(slotIdx);
+    } else if (uiPhase === 'spell_target_bootstrapping' && owner === 'player' && m) {
+        slot.classList.add('spell-target');
+        slot.onclick = () => executeBootstrapping(slotIdx);
+    } else if (uiPhase === 'spell_target_cross_validate' && owner === 'player' && m) {
+        slot.classList.add('spell-target');
+        slot.onclick = () => executeCrossValidate(slotIdx);
     } else if (uiPhase === 'spell_target_missing_data' && m) {
         slot.classList.add('spell-target');
         slot.onclick = () => executeMissingData(slotIdx, owner, 'monster');
@@ -1720,14 +2036,13 @@ function renderMonsterSlot(slotIdx, owner) {
 
     if (!m) return;
 
-    const isMyTurn = gs.is_my_turn;
-    const canAttack = owner === 'player' && !m.summoningSick && m.attacksMade < m.maxAttacks && uiPhase !== 'attack_select_target' && !uiPhase.startsWith('spell');
+    const canAttack = owner === 'player' && m.attacksMade < m.maxAttacks && uiPhase !== 'attack_select_target' && !uiPhase.startsWith('spell');
     const div = document.createElement('div');
     div.className = 'monster-card' + (canAttack ? ' can-attack' : '');
     if (m.isMeta) div.classList.add('is-meta');
     if (attackingMonsterSlot === slotIdx && owner === 'player') div.classList.add('attacking');
 
-    if (owner === 'player' && uiPhase === 'attack_select_monster' && !m.summoningSick && m.attacksMade < m.maxAttacks) {
+    if (owner === 'player' && uiPhase === 'attack_select_monster' && m.attacksMade < m.maxAttacks) {
         div.onclick = () => selectAttackingMonster(slotIdx);
     } else if (owner === 'opp' && uiPhase === 'attack_select_target') {
         slot.classList.add('attack-target');
@@ -1736,9 +2051,7 @@ function renderMonsterSlot(slotIdx, owner) {
 
     let pwrPercent = Math.floor(m.power * 100);
     let pwrColor = pwrPercent < 50 ? '#ff5555' : (pwrPercent < 80 ? '#ffcc00' : '#50fa7b');
-    let atkCountHtml = m.summoningSick
-        ? `<div style="font-size:0.55cqmin; color:#aaa; text-align:center;">Summoning Sickness</div>`
-        : (m.maxAttacks > 1 ? `<div style="font-size:0.6cqmin; color:#aaa; text-align:center;">Atks: ${m.maxAttacks - m.attacksMade}</div>` : '');
+    let atkCountHtml = m.maxAttacks > 1 ? `<div style="font-size:0.6cqmin; color:#aaa; text-align:center;">Atks: ${m.maxAttacks - m.attacksMade}</div>` : '';
     let repHtml = m.hasReplication ? `<span style="color:var(--spell); font-size:0.6cqmin;">[REP]</span>` : '';
 
     div.innerHTML = `
@@ -1762,12 +2075,101 @@ function renderHand() {
     if (!gs) return;
     gs.my_hand.forEach((card, i) => container.appendChild(renderCard(card, i, true)));
 
-    // Opponent hand (card backs)
     const oppContainer = document.getElementById('opp-hand-row');
     oppContainer.innerHTML = '';
     for (let i = 0; i < gs.opp_hand_count; i++) {
         oppContainer.innerHTML += `<div class="card-back"><div style="font-size:2cqmin; color:#555;">?</div></div>`;
     }
+}
+
+function isMulliganPending() {
+    return !!(gs && gs.mulligan_pending);
+}
+
+function renderMulliganHand() {
+    const container = document.getElementById('mulligan-hand');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!gs || !isMulliganPending()) return;
+
+    gs.my_hand.forEach((card, i) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'mulligan-card-wrap' + (mulliganSelection.has(i) ? ' selected' : '');
+
+        const cardEl = renderCard(card, i, false);
+
+        // IMPORTANT: do NOT also bind cardEl.onclick to toggle (causes double toggle via bubbling)
+        wrap.onclick = () => toggleMulliganSelect(i);
+
+        wrap.appendChild(cardEl);
+        container.appendChild(wrap);
+    });
+
+    const countEl = document.getElementById('mulligan-count');
+    if (countEl) countEl.textContent = String(mulliganSelection.size);
+}
+
+function syncMulliganOverlay() {
+    const modal = document.getElementById('mulligan-modal');
+    if (!modal) return;
+
+    if (gameOver || !isMulliganPending()) {
+        modal.classList.remove('active');
+        mulliganSelection.clear();
+        return;
+    }
+
+    modal.classList.add('active');
+
+    const statusEl = document.getElementById('mulligan-status');
+    if (statusEl) {
+        statusEl.textContent = `Hand size: ${gs.my_hand.length}/${MAX_HAND_SIZE}. Select any number of cards to replace.`;
+    }
+
+    renderMulliganHand();
+}
+
+function toggleMulliganSelect(idx) {
+    if (!isMulliganPending()) return;
+    if (mulliganSelection.has(idx)) mulliganSelection.delete(idx);
+    else mulliganSelection.add(idx);
+    renderMulliganHand();
+}
+
+async function confirmMulligan() {
+    if (!isMulliganPending()) return;
+
+    const indices = Array.from(mulliganSelection).sort((a, b) => a - b);
+    const res = (session.gameMode === 'single')
+        ? await localSubmitMulligan(indices)
+        : await apiCall({
+            action: 'submit_mulligan', // requires backend support for online mode
+            room_code: session.roomCode,
+            player_token: session.playerToken,
+            replace_indices: indices
+        });
+
+    if (!res.success) {
+        addLog('Error: ' + (res.message || 'Mulligan failed'), 'error-log');
+        return;
+    }
+
+    gs = res.state || gs;
+
+    if (gs.log && gs.log.length > lastLogCount) {
+        for (let i = lastLogCount; i < gs.log.length; i++) {
+            addLog(gs.log[i].msg, gs.log[i].type);
+        }
+        lastLogCount = gs.log.length;
+    }
+
+    mulliganSelection.clear();
+    renderAll();
+}
+
+function keepOpeningHand() {
+    mulliganSelection.clear();
+    confirmMulligan();
 }
 
 function renderAll() {
@@ -1791,6 +2193,8 @@ function renderAll() {
         ti.textContent = "OPP'S TURN";
         ti.style.color = 'var(--outcome-light)';
     }
+
+    syncMulliganOverlay();
 }
 
 function updateLP() {
@@ -1800,7 +2204,6 @@ function updateLP() {
     document.getElementById('player-lp-bar').style.width = `${Math.max(0, (gs.my_lp / 8000) * 100)}%`;
     document.getElementById('opp-lp-bar').style.width = `${Math.max(0, (gs.opp_lp / 8000) * 100)}%`;
 
-    // Direct attack LP targeting
     if (uiPhase === 'attack_select_target' && !gs.opp_monsters.some(m => m !== null)) {
         document.querySelector('#opp-lp').parentElement.classList.add('lp-target');
         document.querySelector('#opp-lp').parentElement.onclick = () => selectAttackTarget('lp', null);
@@ -1812,13 +2215,14 @@ function updateLP() {
 
 function updateButtons() {
     if (!gs) return;
-    const isMyTurn = gs.is_my_turn && !gameOver;
+    const mulliganPending = isMulliganPending();
+    const isMyTurn = gs.is_my_turn && !gameOver && !mulliganPending;
     const isIdle = uiPhase === 'idle';
 
     const canSummon = gs.my_constructs.some(c => c?.type === 'predictor') &&
                       gs.my_constructs.some(c => c?.type === 'outcome') &&
                       !gs.my_summoned && gs.my_monsters.some(m => m === null);
-    const canAttack = gs.my_monsters.some(m => m && !m.summoningSick && m.attacksMade < m.maxAttacks);
+    const canAttack = gs.my_monsters.some(m => m && m.attacksMade < m.maxAttacks);
     const canMeta = getMetaTarget() !== null;
 
     document.getElementById('btn-summon').disabled = !(isMyTurn && canSummon && isIdle);
@@ -1851,7 +2255,6 @@ function addLog(msg, type = '') {
     const logEl = document.getElementById('game-log');
     const entry = document.createElement('div');
     entry.className = `log-entry ${type}`;
-    // Replace P1/P2 with YOU/OPP
     let display = msg;
     display = display.replace(new RegExp(`P${session.playerNum}`, 'g'), 'You');
     display = display.replace(new RegExp(`P${session.playerNum === 1 ? 2 : 1}`, 'g'), 'Opponent');
@@ -1955,6 +2358,7 @@ function clearSlotHighlights() {
 }
 
 function cancelAction() {
+    if (isMulliganPending()) return;
     uiPhase = 'idle';
     selectedHandCard = null;
     attackingMonsterSlot = null;
@@ -1963,6 +2367,7 @@ function cancelAction() {
 }
 
 function selectHandCard(idx) {
+    if (isMulliganPending()) return;
     if (!gs?.is_my_turn || gameOver || uiPhase.startsWith('attack') || uiPhase.startsWith('summon')) return;
     if (selectedHandCard === idx) { cancelAction(); return; }
 
@@ -1989,6 +2394,18 @@ function selectHandCard(idx) {
             uiPhase = 'spell_target_sample_size';
         } else if (card.id === 'replication') {
             uiPhase = 'spell_target_replication';
+        } else if (card.id === 'bootstrapping') {
+            uiPhase = 'spell_target_bootstrapping';
+        } else if (card.id === 'cross_validate') {
+            uiPhase = 'spell_target_cross_validate';
+        } else if (card.id === 'item_analysis') {
+            uiPhase = 'spell_target_item_analysis';
+        } else if (card.id === 'ceiling_effect') {
+            uiPhase = 'spell_target_ceiling_effect';
+        } else if (card.id === 'construct_drift') {
+            uiPhase = 'spell_target_construct_drift';
+        } else if (card.id === 'criterion_contam') {
+            uiPhase = 'spell_target_criterion_contam';
         }
     }
     renderAll();
@@ -1996,6 +2413,7 @@ function selectHandCard(idx) {
 
 // --- Construct placement ---
 async function onConstructSlotClick(slotIdx) {
+    if (isMulliganPending()) return;
     if (!gs?.is_my_turn || gameOver) return;
 
     if (uiPhase === 'summon_select_pred') {
@@ -2003,12 +2421,17 @@ async function onConstructSlotClick(slotIdx) {
             summonPredSlot = slotIdx;
             uiPhase = 'summon_select_out';
             clearSlotHighlights();
-            for (let i = 0; i < 3; i++) if (gs.my_constructs[i]?.type === 'outcome') document.getElementById(`player-construct-${i}`).classList.add('highlight');
+            for (let i = 0; i < 3; i++) {
+                if (gs.my_constructs[i]?.type === 'outcome' && i !== summonPredSlot) {
+                    document.getElementById(`player-construct-${i}`).classList.add('highlight');
+                }
+            }
             renderAll();
         }
         return;
     }
     if (uiPhase === 'summon_select_out') {
+        if (slotIdx === summonPredSlot) return;
         if (gs.my_constructs[slotIdx]?.type === 'outcome') {
             await submitMove({ type: 'summon', pred_slot: summonPredSlot, out_slot: slotIdx });
             uiPhase = 'idle';
@@ -2034,6 +2457,7 @@ async function onConstructSlotClick(slotIdx) {
 
 // --- Summon ---
 function startSummon() {
+    if (isMulliganPending()) return;
     if (!gs?.is_my_turn || gs.my_summoned) return;
     selectedHandCard = null;
     uiPhase = 'summon_select_pred';
@@ -2083,14 +2507,60 @@ async function executeReplication(slotIdx) {
     selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
 }
 
+async function executeBootstrapping(slotIdx) {
+    if (uiPhase !== 'spell_target_bootstrapping') return;
+    await submitMove({ type: 'play_spell', hand_index: selectedHandCard, target_owner: 'me', target_type: 'monster', target_slot: slotIdx });
+    triggerFlash('heal');
+    selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
+}
+
+async function executeCrossValidate(slotIdx) {
+    if (uiPhase !== 'spell_target_cross_validate') return;
+    await submitMove({ type: 'play_spell', hand_index: selectedHandCard, target_owner: 'me', target_type: 'monster', target_slot: slotIdx });
+    triggerFlash('heal');
+    selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
+}
+
+async function executeItemAnalysis(slotIdx) {
+    if (uiPhase !== 'spell_target_item_analysis') return;
+    await submitMove({ type: 'play_spell', hand_index: selectedHandCard, target_owner: 'me', target_type: 'construct', target_slot: slotIdx });
+    triggerFlash('heal');
+    selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
+}
+
+async function executeCeilingEffect(slotIdx) {
+    if (uiPhase !== 'spell_target_ceiling_effect') return;
+    await submitMove({ type: 'play_spell', hand_index: selectedHandCard, target_owner: 'opp', target_type: 'monster', target_slot: slotIdx });
+    triggerFlash('heal');
+    selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
+}
+
+async function executeConstructDrift(slotIdx) {
+    if (uiPhase !== 'spell_target_construct_drift') return;
+    await submitMove({ type: 'play_spell', hand_index: selectedHandCard, target_owner: 'opp', target_type: 'construct', target_slot: slotIdx });
+    triggerFlash('heal');
+    selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
+}
+
+async function executeCriterionContam(slotIdx) {
+    if (uiPhase !== 'spell_target_criterion_contam') return;
+    await submitMove({ type: 'play_spell', hand_index: selectedHandCard, target_owner: 'opp', target_type: 'monster', target_slot: slotIdx });
+    triggerFlash('heal');
+    selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
+}
+
 function onMonsterSlotClick(slotIdx) {
+    if (isMulliganPending()) return;
     if (uiPhase === 'spell_target_correct') executeCorrection(slotIdx);
     if (uiPhase === 'spell_target_sample_size') executeSampleSize(slotIdx);
     if (uiPhase === 'spell_target_replication') executeReplication(slotIdx);
+    if (uiPhase === 'spell_target_bootstrapping') executeBootstrapping(slotIdx);
+    if (uiPhase === 'spell_target_cross_validate') executeCrossValidate(slotIdx);
 }
 
 // --- Attack ---
 function startAttack() {
+    if (isMulliganPending()) return;
     if (!gs?.is_my_turn || gameOver) return;
     selectedHandCard = null;
     uiPhase = 'attack_select_monster';
@@ -2098,8 +2568,9 @@ function startAttack() {
 }
 
 function selectAttackingMonster(slotIdx) {
+    if (isMulliganPending()) return;
     const m = gs.my_monsters[slotIdx];
-    if (!m || m.summoningSick || m.attacksMade >= m.maxAttacks) return;
+    if (!m || m.attacksMade >= m.maxAttacks) return;
     attackingMonsterSlot = slotIdx;
 
     if (gs.opp_monsters.some(m => m !== null)) {
@@ -2111,6 +2582,7 @@ function selectAttackingMonster(slotIdx) {
 }
 
 async function selectAttackTarget(type, targetSlot) {
+    if (isMulliganPending()) return;
     await executeAttack(type, targetSlot);
 }
 
@@ -2119,24 +2591,20 @@ async function executeAttack(targetType, targetSlot) {
     clearSlotHighlights();
     renderAll();
 
-    // Pause polling so it doesn't reveal results during animation
     clearInterval(session.pollTimer);
 
-    // Submit move but DON'T update state or render yet
     const res = await submitMove({
         type: 'attack',
         attacker_slot: attackingMonsterSlot,
         target_type: targetType,
         target_slot: targetSlot
-    }, true); // skipRender = true
+    }, true);
 
     if (res.move_result) {
         const mr = res.move_result;
 
-        // Play the full dice animation FIRST
         await showDiceRoll(mr.roll, mr.threshold, mr.hit);
 
-        // NOW apply the state update after animation is done
         if (res.state) {
             gs = res.state;
             if (gs.log && gs.log.length > lastLogCount) {
@@ -2147,7 +2615,6 @@ async function executeAttack(targetType, targetSlot) {
             }
         }
 
-        // Now show visual effects
         if (mr.hit) {
             triggerScreenShake();
             triggerFlash('attack');
@@ -2159,10 +2626,8 @@ async function executeAttack(targetType, targetSlot) {
             triggerFlash('error');
         }
 
-        // Now render the updated state
         renderAll();
 
-        // Check for game over after rendering
         if (gs.status === 'finished' && !gameOver) {
             gameOver = true;
             endGame(gs.i_won);
@@ -2173,7 +2638,6 @@ async function executeAttack(targetType, targetSlot) {
     uiPhase = 'idle';
     clearSlotHighlights();
 
-    // Resume polling
     if (!gameOver) {
         session.pollTimer = setInterval(pollNow, 2000);
     }
@@ -2181,6 +2645,7 @@ async function executeAttack(targetType, targetSlot) {
 
 // --- Meta ---
 async function doMeta() {
+    if (isMulliganPending()) return;
     uiPhase = 'idle';
     const res = await submitMove({ type: 'meta' });
     if (res.move_result?.meta) {
@@ -2192,6 +2657,7 @@ async function doMeta() {
 
 // --- End Turn ---
 async function doEndTurn() {
+    if (isMulliganPending()) return;
     if (!gs?.is_my_turn) return;
     uiPhase = 'idle';
     selectedHandCard = null;
