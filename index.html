@@ -263,6 +263,38 @@
         min-height: 3.4cqmin;
         text-align: center;
     }
+    .gallery-reliability,
+    .gallery-zoom-reliability {
+        margin-top: 0.35cqmin;
+        text-align: center;
+        color: var(--gold);
+        font-size: 0.56cqmin;
+    }
+    .gallery-zoom-reliability {
+        margin-top: 0.9cqmin;
+        font-size: 0.95cqmin;
+    }
+    .gallery-pair-table {
+        width: 100%;
+        margin-top: 0.3cqmin;
+        border-collapse: collapse;
+        font-size: 0.5cqmin;
+        line-height: 1.25;
+    }
+    .gallery-pair-table.zoom {
+        margin-top: 0.8cqmin;
+        font-size: 0.86cqmin;
+    }
+    .gallery-pair-table th,
+    .gallery-pair-table td {
+        border: 0.08cqmin solid rgba(255,255,255,0.2);
+        padding: 0.12cqmin 0.16cqmin;
+        text-align: center;
+    }
+    .gallery-pair-table th {
+        color: var(--gold);
+        font-weight: normal;
+    }
     .gallery-zoom-overlay {
         position: absolute;
         inset: 0;
@@ -1008,6 +1040,24 @@ function escapeHtml(text) {
         .replaceAll("'", '&#039;');
 }
 
+function renderGalleryDetails(card, isZoom = false) {
+    if (card.detailType !== 'pairings') {
+        return `<div class="${isZoom ? 'gallery-zoom-copy' : 'gallery-copy'}">${escapeHtml(card.copy)}</div>`;
+    }
+
+    const rows = (card.pairings || [])
+        .map(pair => `<tr><td>${escapeHtml(pair.pair)}</td><td>ρ ${Number(pair.validity).toFixed(2)}</td><td>${escapeHtml(pair.fairnessStars)}</td></tr>`)
+        .join('');
+
+    return `
+        <div class="${isZoom ? 'gallery-zoom-reliability' : 'gallery-reliability'}">Reliability ${escapeHtml(card.reliabilityLabel || 'r')} = ${Number(card.reliability || 0).toFixed(2)}</div>
+        <table class="gallery-pair-table${isZoom ? ' zoom' : ''}">
+            <thead><tr><th>Pair</th><th>Validity</th><th>Fairness</th></tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
+    `;
+}
+
 function openGalleryZoom(card) {
     const overlay = document.getElementById('gallery-zoom-overlay');
     if (!overlay || !card) return;
@@ -1017,8 +1067,8 @@ function openGalleryZoom(card) {
     zoomCard.innerHTML = `
         <div class="gallery-badge">${escapeHtml(card.badge)}</div>
         <h3 class="gallery-zoom-title">${escapeHtml(card.name)}</h3>
-        <div class="gallery-zoom-icon">${escapeHtml(card.icon)}</div>
-        <div class="gallery-zoom-copy">${escapeHtml(card.copy)}</div>
+        ${card.detailType === 'pairings' ? '' : `<div class="gallery-zoom-icon">${escapeHtml(card.icon)}</div>`}
+        ${renderGalleryDetails(card, true)}
     `;
 }
 
@@ -1037,13 +1087,16 @@ document.addEventListener('keydown', event => {
     if (event.key === 'Escape') closeGalleryZoom();
 });
 
+let galleryCardLookup = [];
+
 function renderGalleryCard(card) {
+    const galleryIdx = galleryCardLookup.push(card) - 1;
     return `
-        <article class="gallery-card ${card.cssClass}" tabindex="0" data-gallery-class="${escapeHtml(card.cssClass)}" data-gallery-badge="${escapeHtml(card.badge)}" data-gallery-name="${escapeHtml(card.name)}" data-gallery-icon="${escapeHtml(card.icon)}" data-gallery-copy="${escapeHtml(card.copy)}" onclick="onGalleryCardSelected(event)" onkeydown="onGalleryCardKeydown(event)">
+        <article class="gallery-card ${card.cssClass}" tabindex="0" data-gallery-idx="${galleryIdx}" onclick="onGalleryCardSelected(event)" onkeydown="onGalleryCardKeydown(event)">
             <div class="gallery-badge">${escapeHtml(card.badge)}</div>
             <div class="gallery-name">${escapeHtml(card.name)}</div>
-            <div class="gallery-icon">${escapeHtml(card.icon)}</div>
-            <div class="gallery-copy">${escapeHtml(card.copy)}</div>
+            ${card.detailType === 'pairings' ? '' : `<div class="gallery-icon">${escapeHtml(card.icon)}</div>`}
+            ${renderGalleryDetails(card)}
         </article>
     `;
 }
@@ -1051,13 +1104,9 @@ function renderGalleryCard(card) {
 function onGalleryCardSelected(event) {
     const el = event.currentTarget;
     if (!el?.dataset) return;
-    openGalleryZoom({
-        cssClass: el.dataset.galleryClass,
-        badge: el.dataset.galleryBadge,
-        name: el.dataset.galleryName,
-        icon: el.dataset.galleryIcon,
-        copy: el.dataset.galleryCopy
-    });
+    const card = galleryCardLookup[Number(el.dataset.galleryIdx)];
+    if (!card) return;
+    openGalleryZoom(card);
 }
 
 function onGalleryCardKeydown(event) {
@@ -1078,6 +1127,7 @@ function renderGallerySection(title, cards) {
 function renderCardGallery() {
     const container = document.getElementById('card-gallery-content');
     if (!container) return;
+    galleryCardLookup = [];
 
     const formatPairingLine = (pairLabel, validity, starsText) => `${pairLabel}: ρ=${validity.toFixed(2)} · Fairness ${starsText}`;
 
@@ -1088,10 +1138,13 @@ function renderCardGallery() {
             badge: 'PREDICTOR SCALE',
             name: `${c.short} — ${ind.name}`,
             icon: c.sprite || LOCAL_SPRITES[id] || '🧠',
-            copy: `${c.name} · r=${ind.r.toFixed(2)}\n${(Object.entries(TRUE_VALIDITY[id] || []).map(([outId, validity]) => {
+            detailType: 'pairings',
+            reliabilityLabel: 'r',
+            reliability: ind.r,
+            pairings: Object.entries(TRUE_VALIDITY[id] || []).map(([outId, validity]) => {
                 const fairness = getPairAdverseImpact(id, outId);
-                return formatPairingLine(CONSTRUCTS[outId].short, validity, fairness.starsText);
-            }).join('\n'))}`
+                return { pair: CONSTRUCTS[outId].short, validity, fairnessStars: fairness.starsText };
+            })
         })));
 
     const outcomeCards = Object.entries(CONSTRUCTS)
@@ -1101,14 +1154,16 @@ function renderCardGallery() {
             badge: 'OUTCOME SCALE',
             name: `${c.short} — ${ind.name}`,
             icon: c.sprite || LOCAL_SPRITES[id] || '🎯',
-            copy: `${c.name} · r=${ind.r.toFixed(2)}\n${(Object.keys(TRUE_VALIDITY)
+            detailType: 'pairings',
+            reliabilityLabel: 'r',
+            reliability: ind.r,
+            pairings: Object.keys(TRUE_VALIDITY)
                 .filter(predId => TRUE_VALIDITY[predId]?.[id] !== undefined)
                 .map(predId => {
                     const validity = TRUE_VALIDITY[predId][id];
                     const fairness = getPairAdverseImpact(predId, id);
-                    return formatPairingLine(CONSTRUCTS[predId].short, validity, fairness.starsText);
+                    return { pair: CONSTRUCTS[predId].short, validity, fairnessStars: fairness.starsText };
                 })
-                .join('\n'))}`
         })));
 
     const monsters = [];
