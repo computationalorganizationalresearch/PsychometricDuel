@@ -1129,6 +1129,8 @@ function renderCardGallery() {
     if (!container) return;
     galleryCardLookup = [];
 
+    const formatPairingLine = (pairLabel, validity, starsText) => `${pairLabel}: ρ=${validity.toFixed(2)} · Fairness ${starsText}`;
+
     const predictorCards = Object.entries(CONSTRUCTS)
         .filter(([, c]) => c.type === 'predictor')
         .flatMap(([id, c]) => (c.indicators || []).map(ind => ({
