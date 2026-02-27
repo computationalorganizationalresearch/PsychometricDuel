@@ -1079,6 +1079,8 @@ function renderCardGallery() {
     const container = document.getElementById('card-gallery-content');
     if (!container) return;
 
+    const formatPairingLine = (pairLabel, validity, starsText) => `${pairLabel}: ρ=${validity.toFixed(2)} · Fairness ${starsText}`;
+
     const predictorCards = Object.entries(CONSTRUCTS)
         .filter(([, c]) => c.type === 'predictor')
         .flatMap(([id, c]) => (c.indicators || []).map(ind => ({
@@ -1086,7 +1088,10 @@ function renderCardGallery() {
             badge: 'PREDICTOR SCALE',
             name: `${c.short} — ${ind.name}`,
             icon: c.sprite || LOCAL_SPRITES[id] || '🧠',
-            copy: `${c.name} · r=${ind.r.toFixed(2)}\nOpen card for Validity | Adverse Impact columns`
+            copy: `${c.name} · r=${ind.r.toFixed(2)}\n${(Object.entries(TRUE_VALIDITY[id] || []).map(([outId, validity]) => {
+                const fairness = getPairAdverseImpact(id, outId);
+                return formatPairingLine(CONSTRUCTS[outId].short, validity, fairness.starsText);
+            }).join('\n'))}`
         })));
 
     const outcomeCards = Object.entries(CONSTRUCTS)
@@ -1096,7 +1101,14 @@ function renderCardGallery() {
             badge: 'OUTCOME SCALE',
             name: `${c.short} — ${ind.name}`,
             icon: c.sprite || LOCAL_SPRITES[id] || '🎯',
-            copy: `${c.name} · r=${ind.r.toFixed(2)}\nOpen card for Validity | Adverse Impact columns`
+            copy: `${c.name} · r=${ind.r.toFixed(2)}\n${(Object.keys(TRUE_VALIDITY)
+                .filter(predId => TRUE_VALIDITY[predId]?.[id] !== undefined)
+                .map(predId => {
+                    const validity = TRUE_VALIDITY[predId][id];
+                    const fairness = getPairAdverseImpact(predId, id);
+                    return formatPairingLine(CONSTRUCTS[predId].short, validity, fairness.starsText);
+                })
+                .join('\n'))}`
         })));
 
     const monsters = [];
@@ -1109,7 +1121,7 @@ function renderCardGallery() {
                 badge: 'MONSTER',
                 name: getFunMonsterName(predId, outId),
                 icon: getMonsterSpriteForPair(predId, outId),
-                copy: `${CONSTRUCTS[predId].short} × ${CONSTRUCTS[outId].short} · ρ=${validity.toFixed(2)} | AI ${ai.bwd.toFixed(2)} ${ai.starsText}`
+                copy: `${CONSTRUCTS[predId].short} × ${CONSTRUCTS[outId].short} · ρ=${validity.toFixed(2)} | Fairness ${ai.starsText}`
             });
         });
     });
@@ -2428,7 +2440,7 @@ function renderMonsterSlot(slotIdx, owner) {
             <span style="color:#aaa;">N=${m.n} ${repHtml}</span>
         </div>
         <div class="monster-reliability" style="color:${m.isMeta ? 'var(--gold)' : pwrColor}">PWR: ${pwrPercent}% ${m.isMeta?'(META)':''}</div>
-        <div style="font-size:0.55cqmin; color:var(--gold); text-align:center;">AI ${aiStars}</div>
+        <div style="font-size:0.55cqmin; color:var(--gold); text-align:center;">Fairness ${aiStars}</div>
         ${waitHtml}
         ${atkCountHtml}
     `;
@@ -2681,7 +2693,7 @@ function showCardTooltip(e, card) {
             rows = Object.keys(TRUE_VALIDITY[card.constructId]).map(o => {
                 const v = TRUE_VALIDITY[card.constructId][o];
                 const ai = getPairAdverseImpact(card.constructId, o);
-                return `<tr><td style="padding:0.2vmin 0.4vmin;">${CONSTRUCTS[o]?.short||o}</td><td style="padding:0.2vmin 0.4vmin;">ρ ${v.toFixed(2)}</td><td style="padding:0.2vmin 0.4vmin;">d ${Math.abs(ai.bwd).toFixed(2)} ${ai.starsText}</td></tr>`;
+                return `<tr><td style="padding:0.2vmin 0.4vmin;">${CONSTRUCTS[o]?.short||o}</td><td style="padding:0.2vmin 0.4vmin;">ρ ${v.toFixed(2)}</td><td style="padding:0.2vmin 0.4vmin;">${ai.starsText}</td></tr>`;
             }).join('');
         } else if (card.type === 'outcome') {
             rows = Object.keys(TRUE_VALIDITY)
@@ -2689,10 +2701,10 @@ function showCardTooltip(e, card) {
                 .map(p => {
                     const v = TRUE_VALIDITY[p][card.constructId];
                     const ai = getPairAdverseImpact(p, card.constructId);
-                    return `<tr><td style="padding:0.2vmin 0.4vmin;">${CONSTRUCTS[p]?.short||p}</td><td style="padding:0.2vmin 0.4vmin;">ρ ${v.toFixed(2)}</td><td style="padding:0.2vmin 0.4vmin;">d ${Math.abs(ai.bwd).toFixed(2)} ${ai.starsText}</td></tr>`;
+                    return `<tr><td style="padding:0.2vmin 0.4vmin;">${CONSTRUCTS[p]?.short||p}</td><td style="padding:0.2vmin 0.4vmin;">ρ ${v.toFixed(2)}</td><td style="padding:0.2vmin 0.4vmin;">${ai.starsText}</td></tr>`;
                 }).join('');
         }
-        tip.innerHTML = `<div style="color:var(--gold);">${card.construct}</div><div>Item: ${card.indicator}</div><div>Avg r̄ = ${card.avgR.toFixed(2)}</div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="color:var(--gold);">Validity | Adverse Impact</div><table style="width:100%; font-size:0.8vmin; border-collapse:collapse;"><thead><tr><th align="left">Pair</th><th align="left">Validity</th><th align="left">Adverse Impact</th></tr></thead><tbody>${rows}</tbody></table>`;
+        tip.innerHTML = `<div style="color:var(--gold);">${card.construct}</div><div>Item: ${card.indicator}</div><div>Avg r̄ = ${card.avgR.toFixed(2)}</div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="color:var(--gold);">Validity | Fairness</div><table style="width:100%; font-size:0.8vmin; border-collapse:collapse;"><thead><tr><th align="left">Pair</th><th align="left">Validity</th><th align="left">Fairness</th></tr></thead><tbody>${rows}</tbody></table>`;
     } else {
         tip.innerHTML = `<div style="color:var(--gold);">${card.name}</div><div style="color:var(--gray);">${card.type.toUpperCase()}</div><div style="margin-top:0.5vmin;">${card.desc}</div>`;
     }
@@ -2710,9 +2722,8 @@ function showMonsterTooltip(e, m) {
     let pwrPercent = Math.floor(m.power * 100);
     let targetD20 = Math.max(1, Math.round(m.power * 20));
     const aiStars = m.adverseStarsText || '★★★★★';
-    const aiBwd = Math.abs(m.adverseImpact ?? 0);
     const waitRule = m.adverseWaitTurns ?? 0;
-    tip.innerHTML = `<div style="color:var(--gold);">${m.name}</div><div style="color:#ff6644; font-size:1.5vmin;">ATK: ${m.atk}</div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="display:grid; grid-template-columns:1fr 1fr; gap:0.8vmin;"><div><div style="color:var(--gold);">Validity</div><div style="color:var(--gray);">r_true (ρ) = ${m.rTrue.toFixed(2)}</div><div style="color:var(--gray);">r_obs = ${m.rObs.toFixed(3)}</div></div><div><div style="color:var(--gold);">Adverse Impact</div><div style="color:var(--gray);">B-W d = ${aiBwd.toFixed(2)}</div><div style="color:var(--gray);">Stars: ${aiStars}</div><div style="color:var(--gray);">Wait on attack: ${waitRule} turn(s)</div></div></div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="color:var(--resource);">Sample Size (N) = ${m.n}</div><div style="color:var(--green);">Power (1-β) = ${pwrPercent}%</div><div style="color:var(--white); font-size:0.8vmin;">Needs ≤ ${targetD20} on D20 to Hit</div>`;
+    tip.innerHTML = `<div style="color:var(--gold);">${m.name}</div><div style="color:#ff6644; font-size:1.5vmin;">ATK: ${m.atk}</div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="display:grid; grid-template-columns:1fr 1fr; gap:0.8vmin;"><div><div style="color:var(--gold);">Validity</div><div style="color:var(--gray);">r_true (ρ) = ${m.rTrue.toFixed(2)}</div><div style="color:var(--gray);">r_obs = ${m.rObs.toFixed(3)}</div></div><div><div style="color:var(--gold);">Fairness</div><div style="color:var(--gray);">Stars: ${aiStars}</div><div style="color:var(--gray);">Wait on attack: ${waitRule} turn(s)</div></div></div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="color:var(--resource);">Sample Size (N) = ${m.n}</div><div style="color:var(--green);">Power (1-β) = ${pwrPercent}%</div><div style="color:var(--white); font-size:0.8vmin;">Needs ≤ ${targetD20} on D20 to Hit</div>`;
     positionTooltip(e, tip);
 }
 function positionTooltip(e, tip) {
