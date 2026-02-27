@@ -842,6 +842,58 @@ const TRUE_VALIDITY = {
     work_sample: { job_perf: 0.54, turnover: 0.15, job_sat: 0.12, ocb: 0.10 }
 };
 
+// Black-White standardized differences (Cohen's d) where available from the provided table.
+// Other outcome pairings are best-practice approximations to keep tradeoffs visible in gameplay.
+const ADVERSE_IMPACT_BWD = {
+    cog_ability: { job_perf: 0.79, turnover: 0.73, job_sat: 0.70, ocb: 0.68 },
+    conscient:   { job_perf: -0.07, turnover: -0.03, job_sat: 0.00, ocb: 0.02 },
+    struct_int:  { job_perf: 0.23, turnover: 0.27, job_sat: 0.24, ocb: 0.25 },
+    work_sample: { job_perf: 0.67, turnover: 0.62, job_sat: 0.60, ocb: 0.58 }
+};
+
+function adverseImpactStarsFromBwd(rawBwd) {
+    const d = Math.abs(rawBwd ?? 0);
+    if (d <= 0.10) return 5;
+    if (d <= 0.25) return 4;
+    if (d <= 0.45) return 3;
+    if (d <= 0.65) return 2;
+    return 1;
+}
+
+function waitTurnsFromStars(stars) {
+    if (stars >= 4) return 0;
+    if (stars === 3) return 1;
+    if (stars === 2) return 2;
+    if (stars === 1) return 0;
+    return 0;
+}
+
+function getPairAdverseImpact(predId, outId) {
+    const bwd = (ADVERSE_IMPACT_BWD[predId] || {})[outId] ?? 0.3;
+    const stars = adverseImpactStarsFromBwd(bwd);
+    return {
+        bwd,
+        stars,
+        waitTurns: waitTurnsFromStars(stars),
+        starsText: '★'.repeat(stars) + '☆'.repeat(5 - stars)
+    };
+}
+
+
+function validityStarsFromRho(rho) {
+    const v = Math.abs(rho ?? 0);
+    if (v >= 0.50) return 5;
+    if (v >= 0.35) return 4;
+    if (v >= 0.25) return 3;
+    if (v >= 0.15) return 2;
+    return 1;
+}
+
+function validityStarsTextFromRho(rho) {
+    const stars = validityStarsFromRho(rho);
+    return '★'.repeat(stars) + '☆'.repeat(5 - stars);
+}
+
 const MONSTER_NAMES = {
     cog_ability: {
         job_perf: "Sapient Performer",
@@ -1049,7 +1101,7 @@ function renderCardGallery() {
             badge: 'PREDICTOR SCALE',
             name: `${c.short} — ${ind.name}`,
             icon: c.sprite || LOCAL_SPRITES[id] || '🧠',
-            copy: `${c.name} · r=${ind.r.toFixed(2)}`
+            copy: Object.keys(TRUE_VALIDITY[id]).map(outId => { const ai = getPairAdverseImpact(id, outId); const vStars = validityStarsTextFromRho(TRUE_VALIDITY[id][outId]); return `${CONSTRUCTS[outId].short} V:${vStars} F:${ai.starsText}`; }).join(' · ')
         })));
 
     const outcomeCards = Object.entries(CONSTRUCTS)
@@ -1059,19 +1111,23 @@ function renderCardGallery() {
             badge: 'OUTCOME SCALE',
             name: `${c.short} — ${ind.name}`,
             icon: c.sprite || LOCAL_SPRITES[id] || '🎯',
-            copy: `${c.name} · r=${ind.r.toFixed(2)}`
+            copy: Object.keys(TRUE_VALIDITY)
+                .filter(predId => TRUE_VALIDITY[predId][id] !== undefined)
+                .map(predId => { const ai = getPairAdverseImpact(predId, id); const vStars = validityStarsTextFromRho(TRUE_VALIDITY[predId][id]); return `${CONSTRUCTS[predId].short} V:${vStars} F:${ai.starsText}`; })
+                .join(' · ')
         })));
 
     const monsters = [];
     const predictors = Object.keys(TRUE_VALIDITY);
     predictors.forEach(predId => {
         Object.entries(TRUE_VALIDITY[predId]).forEach(([outId, validity]) => {
+            const ai = getPairAdverseImpact(predId, outId);
             monsters.push({
                 cssClass: 'monster',
                 badge: 'MONSTER',
                 name: getFunMonsterName(predId, outId),
                 icon: getMonsterSpriteForPair(predId, outId),
-                copy: `${CONSTRUCTS[predId].short} × ${CONSTRUCTS[outId].short} · rₜ=${validity.toFixed(2)}`
+                copy: `${CONSTRUCTS[predId].short} × ${CONSTRUCTS[outId].short} · V:${validityStarsTextFromRho(validity)} · F:${ai.starsText}`
             });
         });
     });
@@ -1299,6 +1355,7 @@ function findBestSummonPair(player) {
 }
 function buildMonster(predStack, outStack) {
     const rho = (TRUE_VALIDITY[predStack.constructId] || {})[outStack.constructId] ?? 0.1;
+    const ai = getPairAdverseImpact(predStack.constructId, outStack.constructId);
     const predAlpha = alphaFromStack(predStack);
     const outAlpha = alphaFromStack(outStack);
 
@@ -1309,6 +1366,11 @@ function buildMonster(predStack, outStack) {
         outId: outStack.constructId,
         predAlpha, outAlpha,
         rTrue: rho,
+        adverseImpact: ai.bwd,
+        adverseStars: ai.stars,
+        adverseStarsText: ai.starsText,
+        adverseWaitTurns: ai.waitTurns,
+        waitTurnsRemaining: 0,
         rObs: 0,
         baseAtk: 0,
         atk: 0,
@@ -1338,6 +1400,11 @@ function buildMetaMonster(monsters) {
         predAlpha: 0.99,
         outAlpha: 0.99,
         rTrue: clamp(meanR * 1.35, 0.35, 0.95),
+        adverseImpact: 0,
+        adverseStars: 5,
+        adverseStarsText: '★★★★★',
+        adverseWaitTurns: 0,
+        waitTurnsRemaining: 0,
         rObs: clamp(meanR * 1.25, 0.35, 0.9),
         baseAtk: clamp(Math.round(meanAtk * 1.45), 2400, 5200),
         atk: 0,
@@ -1383,6 +1450,7 @@ function startTurnFor(pid) {
     drawCards(p, 1);
     p.monsters.forEach(m => {
         if (m) {
+            if ((m.waitTurnsRemaining ?? 0) > 0) m.waitTurnsRemaining -= 1;
             m.summoningSick = false;
             m.attacksMade = 0;
             m.maxAttacks = m.isMeta ? 2 : (m.hasReplication ? 2 : 1);
@@ -1542,7 +1610,7 @@ function localAttackResolution(attacker, defender) {
     return { damage: 0, outcome: 'tie', destroyAttacker: true, destroyDefender: true };
 }
 function canMonsterAttack(monster) {
-    return !!monster && !monster.summoningSick && monster.attacksMade < monster.maxAttacks;
+    return !!monster && !monster.summoningSick && (monster.waitTurnsRemaining ?? 0) <= 0 && monster.attacksMade < monster.maxAttacks;
 }
 
 function applyLocalMove(pid, move) {
@@ -1691,6 +1759,7 @@ function applyLocalMove(pid, move) {
         const attacker = me.monsters[move.attacker_slot];
         if (!attacker) return { success: false, message: 'No attacker in that slot' };
         if (attacker.summoningSick) return { success: false, message: 'This monster cannot attack the turn it was summoned' };
+        if ((attacker.waitTurnsRemaining ?? 0) > 0) return { success: false, message: `This monster is waiting ${attacker.waitTurnsRemaining} more turn(s)` };
         if (attacker.attacksMade >= attacker.maxAttacks) return { success: false, message: 'This monster has no attacks left' };
 
         const threshold = clamp(Math.round(attacker.power * 20), 1, 20);
@@ -1699,6 +1768,7 @@ function applyLocalMove(pid, move) {
         move_result = { roll, threshold, hit, attack_data: { damage: 0, outcome: 'tie' } };
 
         attacker.attacksMade += 1;
+        attacker.waitTurnsRemaining = Math.max(attacker.waitTurnsRemaining ?? 0, attacker.adverseWaitTurns ?? 0);
 
         if (!hit) {
             logLocal(`P${pid}'s ${attacker.name} attacks and rolls ${roll} (needs ≤ ${threshold}). Type II error — attack misses.`, 'battle-log');
@@ -2365,6 +2435,8 @@ function renderMonsterSlot(slotIdx, owner) {
     let pwrColor = pwrPercent < 50 ? '#ff5555' : (pwrPercent < 80 ? '#ffcc00' : '#50fa7b');
     let atkCountHtml = m.maxAttacks > 1 ? `<div style="font-size:0.6cqmin; color:#aaa; text-align:center;">Atks: ${m.maxAttacks - m.attacksMade}</div>` : '';
     let repHtml = m.hasReplication ? `<span style="color:var(--spell); font-size:0.6cqmin;">[REP]</span>` : '';
+    const aiStars = m.adverseStarsText || '★★★★★';
+    const waitHtml = (m.waitTurnsRemaining ?? 0) > 0 ? `<div style="font-size:0.58cqmin; color:#ff5555; text-align:center;">WAIT ${m.waitTurnsRemaining} TURN(S)</div>` : '';
 
     div.innerHTML = `
         <div class="monster-name">${m.name}</div>
@@ -2374,6 +2446,8 @@ function renderMonsterSlot(slotIdx, owner) {
             <span style="color:#aaa;">N=${m.n} ${repHtml}</span>
         </div>
         <div class="monster-reliability" style="color:${m.isMeta ? 'var(--gold)' : pwrColor}">PWR: ${pwrPercent}% ${m.isMeta?'(META)':''}</div>
+        <div style="font-size:0.55cqmin; color:var(--gold); text-align:center;">Fairness ${aiStars}</div>
+        ${waitHtml}
         ${atkCountHtml}
     `;
     div.onmouseenter = (e) => showMonsterTooltip(e, m);
@@ -2620,16 +2694,23 @@ function showDiceRoll(roll, threshold, hit) {
 function showCardTooltip(e, card) {
     const tip = document.getElementById('tooltip');
     if (card.isItem) {
-        let valString = '';
+        let rows = '';
         if (card.type === 'predictor' && TRUE_VALIDITY[card.constructId]) {
-            valString = Object.keys(TRUE_VALIDITY[card.constructId])
-                .map(o => `→ ${CONSTRUCTS[o]?.short||o}: ρ = ${TRUE_VALIDITY[card.constructId][o].toFixed(2)}`).join('<br>');
+            rows = Object.keys(TRUE_VALIDITY[card.constructId]).map(o => {
+                const v = TRUE_VALIDITY[card.constructId][o];
+                const ai = getPairAdverseImpact(card.constructId, o);
+                const vStars = validityStarsTextFromRho(v); return `<tr><td style="padding:0.2vmin 0.4vmin;">${CONSTRUCTS[o]?.short||o}</td><td style="padding:0.2vmin 0.4vmin;">${vStars}</td><td style="padding:0.2vmin 0.4vmin;">${ai.starsText}</td></tr>`;
+            }).join('');
         } else if (card.type === 'outcome') {
-            valString = Object.keys(TRUE_VALIDITY)
+            rows = Object.keys(TRUE_VALIDITY)
                 .filter(p => TRUE_VALIDITY[p][card.constructId] !== undefined)
-                .map(p => `${CONSTRUCTS[p]?.short||p} →: ρ = ${TRUE_VALIDITY[p][card.constructId].toFixed(2)}`).join('<br>');
+                .map(p => {
+                    const v = TRUE_VALIDITY[p][card.constructId];
+                    const ai = getPairAdverseImpact(p, card.constructId);
+                    const vStars = validityStarsTextFromRho(v); return `<tr><td style="padding:0.2vmin 0.4vmin;">${CONSTRUCTS[p]?.short||p}</td><td style="padding:0.2vmin 0.4vmin;">${vStars}</td><td style="padding:0.2vmin 0.4vmin;">${ai.starsText}</td></tr>`;
+                }).join('');
         }
-        tip.innerHTML = `<div style="color:var(--gold);">${card.construct}</div><div>Item: ${card.indicator}</div><div>Avg r̄ = ${card.avgR.toFixed(2)}</div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="color:var(--gold);">True Validities:</div>${valString}`;
+        tip.innerHTML = `<div style="color:var(--gold);">${card.construct}</div><div>Item: ${card.indicator}</div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="color:var(--gold);">Validity | Fairness</div><table style="width:100%; font-size:0.8vmin; border-collapse:collapse;"><thead><tr><th align="left">Pair</th><th align="left">Validity</th><th align="left">Fairness</th></tr></thead><tbody>${rows}</tbody></table>`;
     } else {
         tip.innerHTML = `<div style="color:var(--gold);">${card.name}</div><div style="color:var(--gray);">${card.type.toUpperCase()}</div><div style="margin-top:0.5vmin;">${card.desc}</div>`;
     }
@@ -2646,7 +2727,10 @@ function showMonsterTooltip(e, m) {
     const tip = document.getElementById('tooltip');
     let pwrPercent = Math.floor(m.power * 100);
     let targetD20 = Math.max(1, Math.round(m.power * 20));
-    tip.innerHTML = `<div style="color:var(--gold);">${m.name}</div><div style="color:#ff6644; font-size:1.5vmin;">ATK: ${m.atk}</div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="color:var(--gray);">r_true (ρ) = ${m.rTrue.toFixed(2)}</div><div style="color:var(--gray);">r_obs = ${m.rObs.toFixed(3)}</div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="color:var(--resource);">Sample Size (N) = ${m.n}</div><div style="color:var(--green);">Power (1-β) = ${pwrPercent}%</div><div style="color:var(--white); font-size:0.8vmin;">Needs ≤ ${targetD20} on D20 to Hit</div>`;
+    const aiStars = m.adverseStarsText || '★★★★★';
+    const validityStars = validityStarsTextFromRho(m.rTrue ?? 0);
+    const waitRule = m.adverseWaitTurns ?? 0;
+    tip.innerHTML = `<div style="color:var(--gold);">${m.name}</div><div style="color:#ff6644; font-size:1.5vmin;">ATK: ${m.atk}</div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="display:grid; grid-template-columns:1fr 1fr; gap:0.8vmin;"><div><div style="color:var(--gold);">Validity</div><div style="color:var(--gray);">Stars: ${validityStars}</div></div><div><div style="color:var(--gold);">Fairness</div><div style="color:var(--gray);">Stars: ${aiStars}</div><div style="color:var(--gray);">Wait on attack: ${waitRule} turn(s)</div></div></div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="color:var(--resource);">Sample Size (N) = ${m.n}</div><div style="color:var(--green);">Power (1-β) = ${pwrPercent}%</div><div style="color:var(--white); font-size:0.8vmin;">Needs ≤ ${targetD20} on D20 to Hit</div>`;
     positionTooltip(e, tip);
 }
 function positionTooltip(e, tip) {
