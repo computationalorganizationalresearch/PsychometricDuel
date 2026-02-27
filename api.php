@@ -107,6 +107,45 @@ function getTrueValidity() {
     ];
 }
 
+
+function getAdverseImpactBwd() {
+    return [
+        'cog_ability' => ['job_perf'=>0.79,'turnover'=>0.73,'job_sat'=>0.70,'ocb'=>0.68],
+        'conscient'   => ['job_perf'=>-0.07,'turnover'=>-0.03,'job_sat'=>0.00,'ocb'=>0.02],
+        'struct_int'  => ['job_perf'=>0.23,'turnover'=>0.27,'job_sat'=>0.24,'ocb'=>0.25],
+        'work_sample' => ['job_perf'=>0.67,'turnover'=>0.62,'job_sat'=>0.60,'ocb'=>0.58]
+    ];
+}
+
+function adverseImpactStarsFromBwd($rawBwd) {
+    $d = abs($rawBwd ?? 0);
+    if ($d <= 0.10) return 5;
+    if ($d <= 0.25) return 4;
+    if ($d <= 0.45) return 3;
+    if ($d <= 0.65) return 2;
+    return 1;
+}
+
+function waitTurnsFromStars($stars) {
+    if ($stars >= 4) return 0;
+    if ($stars === 3) return 1;
+    if ($stars === 2) return 2;
+    if ($stars === 1) return 0;
+    return 0;
+}
+
+function getPairAdverseImpact($predId, $outId) {
+    $map = getAdverseImpactBwd();
+    $bwd = $map[$predId][$outId] ?? 0.3;
+    $stars = adverseImpactStarsFromBwd($bwd);
+    return [
+        'bwd' => $bwd,
+        'stars' => $stars,
+        'waitTurns' => waitTurnsFromStars($stars),
+        'starsText' => str_repeat('★', $stars) . str_repeat('☆', max(0, 5 - $stars))
+    ];
+}
+
 function getMonsterNames() {
     return [
         'cog_ability' => ['job_perf'=>'Sapient Performer','turnover'=>'Logic Guardian','job_sat'=>"Mind's Content",'ocb'=>'Brilliant Helper'],
@@ -432,6 +471,8 @@ function moveSummon(&$state, &$me, $pNum, $move) {
     $predId = $pred['constructId'];
     $outId = $out['constructId'];
 
+    $ai = getPairAdverseImpact($predId, $outId);
+
     $monster = [
         'name' => $mn[$predId][$outId] ?? "{$predId} × {$outId}",
         'sprite' => $GLOBALS['MONSTER_SPRITES'][array_rand($GLOBALS['MONSTER_SPRITES'])],
@@ -440,6 +481,11 @@ function moveSummon(&$state, &$me, $pNum, $move) {
         'predAlpha' => spearmanBrown(count($pred['cards']), $pred['cards'][0]['avgR']),
         'outAlpha' => spearmanBrown(count($out['cards']), $out['cards'][0]['avgR']),
         'rTrue' => $tv[$predId][$outId] ?? 0.1,
+        'adverseImpact' => $ai['bwd'],
+        'adverseStars' => $ai['stars'],
+        'adverseStarsText' => $ai['starsText'],
+        'adverseWaitTurns' => $ai['waitTurns'],
+        'waitTurnsRemaining' => 0,
         'rObs' => 0,
         'baseAtk' => 0,
         'atk' => 0,
@@ -538,6 +584,7 @@ function moveAttack(&$state, &$me, &$opp, $pNum, $move) {
     $attacker = &$me['monsters'][$atkSlot];
     if (!$attacker) return ['ok'=>false,'msg'=>'No attacker in that slot'];
     if (!empty($attacker['summoningSick'])) return ['ok'=>false,'msg'=>'This monster cannot attack the turn it was summoned'];
+    if (($attacker['waitTurnsRemaining'] ?? 0) > 0) return ['ok'=>false,'msg'=>'This monster is waiting ' . $attacker['waitTurnsRemaining'] . ' more turn(s)'];
     if (($attacker['attacksMade'] ?? 0) >= ($attacker['maxAttacks'] ?? 1)) return ['ok'=>false,'msg'=>'This monster has no attacks left'];
 
     $threshold = clamp((int) round(($attacker['power'] ?? 0.05) * 20), 1, 20);
@@ -547,6 +594,7 @@ function moveAttack(&$state, &$me, &$opp, $pNum, $move) {
     $result = ['ok'=>true,'roll'=>$roll,'threshold'=>$threshold,'hit'=>$hit,'attack_data'=>['damage'=>0,'outcome'=>'tie']];
 
     $attacker['attacksMade']++;
+    $attacker['waitTurnsRemaining'] = max(($attacker['waitTurnsRemaining'] ?? 0), ($attacker['adverseWaitTurns'] ?? 0));
 
     if (!$hit) {
         $state['log'][] = ['msg' => "P{$pNum}'s {$attacker['name']} misses (roll {$roll}, needs ≤ {$threshold}).", 'type' => 'battle-log'];
@@ -614,6 +662,11 @@ function moveMeta(&$state, &$me, $pNum) {
         'predAlpha' => 0.99,
         'outAlpha' => 0.99,
         'rTrue' => clamp($meanR * 1.35, 0.35, 0.95),
+        'adverseImpact' => 0,
+        'adverseStars' => 5,
+        'adverseStarsText' => '★★★★★',
+        'adverseWaitTurns' => 0,
+        'waitTurnsRemaining' => 0,
         'rObs' => clamp($meanR * 1.25, 0.35, 0.9),
         'baseAtk' => clamp((int) round($meanAtk * 1.45), 2400, 5200),
         'atk' => 0,
@@ -639,6 +692,7 @@ function moveMeta(&$state, &$me, $pNum) {
 function resetMonstersForTurn(&$player) {
     foreach ($player['monsters'] as &$m) {
         if (!$m) continue;
+        if (($m['waitTurnsRemaining'] ?? 0) > 0) $m['waitTurnsRemaining']--;
         $m['summoningSick'] = false;
         $m['attacksMade'] = 0;
         $m['maxAttacks'] = !empty($m['isMeta']) ? 2 : (!empty($m['hasReplication']) ? 2 : 1);
