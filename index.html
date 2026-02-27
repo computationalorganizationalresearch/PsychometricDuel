@@ -163,6 +163,101 @@
     .modal-box h2 { color: var(--gold); font-size: 2.5cqmin; margin-bottom: 2cqmin; }
     .modal-box h3 { color: var(--predictor-light); font-size: 1.8cqmin; margin: 2cqmin 0 1cqmin; }
 
+    #card-gallery-modal .modal-box {
+        width: min(120cqmin, 96%);
+        max-width: none;
+        background: linear-gradient(180deg, #121233, #0a0a1f 55%);
+        border-color: var(--gold-dark);
+        box-shadow: inset 0 0 0 0.2cqmin rgba(255,204,0,0.2);
+    }
+    .gallery-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 1cqmin;
+        margin-bottom: 1.5cqmin;
+    }
+    .gallery-subtitle {
+        color: var(--gray);
+        font-size: 1cqmin;
+        line-height: 1.5;
+    }
+    .gallery-scroll {
+        max-height: min(64vh, 62cqmin);
+        overflow-y: auto;
+        padding-right: 0.8cqmin;
+    }
+    .gallery-section { margin-bottom: 2.2cqmin; }
+    .gallery-section-title {
+        font-size: 1.2cqmin;
+        color: var(--gold);
+        border-bottom: 0.12cqmin solid rgba(255,204,0,0.4);
+        padding-bottom: 0.6cqmin;
+        margin-bottom: 1cqmin;
+    }
+    .gallery-cards-row {
+        display: flex;
+        gap: 0.8cqmin;
+        overflow-x: auto;
+        padding-bottom: 0.8cqmin;
+    }
+    .gallery-card {
+        width: 10.4cqmin;
+        min-height: 14.6cqmin;
+        border: 0.18cqmin solid;
+        padding: 0.55cqmin;
+        background: #171733;
+        display: flex;
+        flex-direction: column;
+        flex-shrink: 0;
+    }
+    .gallery-card.predictor { border-color: var(--predictor); }
+    .gallery-card.outcome { border-color: var(--outcome); }
+    .gallery-card.monster { border-color: var(--gold); background: linear-gradient(140deg, #1c1c39, #2a1a3a); }
+    .gallery-card.spell { border-color: var(--spell); background: #0a1f14; }
+    .gallery-card.trap { border-color: var(--trap); background: #1a0a1f; }
+    .gallery-card.meta { border-color: var(--meta); background: linear-gradient(140deg, #2d0836, #1a0420); }
+    .gallery-badge {
+        font-size: 0.62cqmin;
+        color: #fff;
+        text-align: center;
+        padding: 0.2cqmin;
+        margin-bottom: 0.35cqmin;
+        letter-spacing: 0.04cqmin;
+    }
+    .gallery-card.predictor .gallery-badge { background: var(--predictor); }
+    .gallery-card.outcome .gallery-badge { background: var(--outcome); }
+    .gallery-card.monster .gallery-badge { background: var(--gold-dark); }
+    .gallery-card.spell .gallery-badge { background: var(--spell); }
+    .gallery-card.trap .gallery-badge { background: var(--trap); }
+    .gallery-card.meta .gallery-badge { background: var(--meta); }
+    .gallery-name {
+        color: var(--gold);
+        font-size: 0.76cqmin;
+        text-align: center;
+        line-height: 1.4;
+        margin-bottom: 0.35cqmin;
+        min-height: 2.1cqmin;
+    }
+    .gallery-icon {
+        flex: 1;
+        min-height: 3cqmin;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 2.1cqmin;
+    }
+    .gallery-copy {
+        margin-top: 0.45cqmin;
+        border-top: 0.1cqmin solid rgba(255,255,255,0.14);
+        padding-top: 0.4cqmin;
+        font-size: 0.58cqmin;
+        line-height: 1.4;
+        color: #d8d8e3;
+        min-height: 3.4cqmin;
+        text-align: center;
+    }
+
     /* ===== GAME SCREEN ===== */
     #game-screen { display: none; height: 100%; flex-direction: column; width: 100%; position: relative; }
     #game-screen.active { display: flex; }
@@ -435,6 +530,7 @@
         <div id="main-menu" class="lobby-section">
             <button class="start-btn" onclick="showMenu('online')">ONLINE MULTIPLAYER</button>
             <button class="start-btn" onclick="showMenu('single')">SINGLE PLAYER</button>
+            <button class="how-to-btn" onclick="showCardGallery()">CARD GALLERY</button>
             <button class="how-to-btn" onclick="showTutorial()">HOW TO PLAY</button>
         </div>
 
@@ -554,6 +650,17 @@
         </div>
     </div>
 
+    <div class="modal-overlay" id="card-gallery-modal">
+        <div class="modal-box">
+            <div class="gallery-header">
+                <h2>CARD GALLERY</h2>
+                <div class="gallery-subtitle">Retro binder mode — scroll each row like classic handheld duels.</div>
+            </div>
+            <div class="gallery-scroll" id="card-gallery-content"></div>
+            <button class="how-to-btn" style="display:block; margin: 2cqmin auto 0;" onclick="closeCardGallery()">BACK TO MENU</button>
+        </div>
+    </div>
+
     <div class="modal-overlay" id="mulligan-modal">
         <div class="modal-box">
             <h2>OPENING MULLIGAN</h2>
@@ -659,14 +766,15 @@ const STARTING_HAND_SIZE = 10;
 
 // ==================== PSYCHOMETRICS DATA (for tooltips) ====================
 const CONSTRUCTS = {
-    cog_ability: { name: "Cognitive Ability", type: "predictor", short: "COG", avgR: 0.65 },
-    conscient: { name: "Conscientiousness", type: "predictor", short: "CON", avgR: 0.45 },
-    struct_int: { name: "Struct. Interview", type: "predictor", short: "INT", avgR: 0.55 },
-    work_sample: { name: "Work Sample", type: "predictor", short: "WST", avgR: 0.50 },
-    job_perf: { name: "Job Performance", type: "outcome", short: "PERF", avgR: 0.52 },
-    turnover: { name: "Turnover", type: "outcome", short: "TURN", avgR: 0.40 },
-    job_sat: { name: "Job Satisfaction", type: "outcome", short: "SAT", avgR: 0.48 },
-    ocb: { name: "OCB", type: "outcome", short: "OCB", avgR: 0.44 }
+    cog_ability: { name: "Cognitive Ability", type: "predictor", short: "COG", avgR: 0.65, sprite: "🧠", indicators: [{ name: "GMA Test", r: 0.67 }, { name: "Wonderlic", r: 0.63 }, { name: "Raven's", r: 0.64 }] },
+    conscient: { name: "Conscientiousness", type: "predictor", short: "CON", avgR: 0.45, sprite: "📋", indicators: [{ name: "NEO-PI-R C", r: 0.47 }, { name: "BFI Consc.", r: 0.43 }, { name: "HEXACO C", r: 0.45 }] },
+    struct_int: { name: "Struct. Interview", type: "predictor", short: "INT", avgR: 0.55, sprite: "🎤", indicators: [{ name: "Behavioral", r: 0.56 }, { name: "Situational", r: 0.53 }, { name: "Panel Rtg", r: 0.55 }] },
+    work_sample: { name: "Work Sample", type: "predictor", short: "WST", avgR: 0.50, sprite: "🔧", indicators: [{ name: "In-Basket", r: 0.48 }, { name: "Role Play", r: 0.52 }, { name: "Present.", r: 0.50 }] },
+
+    job_perf: { name: "Job Performance", type: "outcome", short: "PERF", avgR: 0.52, sprite: "⭐", indicators: [{ name: "Super. Rtg", r: 0.54 }, { name: "Obj. Output", r: 0.50 }, { name: "Peer Rtg", r: 0.52 }] },
+    turnover: { name: "Turnover", type: "outcome", short: "TURN", avgR: 0.40, sprite: "🚪", indicators: [{ name: "Intent Quit", r: 0.42 }, { name: "Actual Quit", r: 0.38 }, { name: "Absent", r: 0.40 }] },
+    job_sat: { name: "Job Satisfaction", type: "outcome", short: "SAT", avgR: 0.48, sprite: "😊", indicators: [{ name: "JDI Scale", r: 0.50 }, { name: "MSQ Score", r: 0.47 }, { name: "Faces Scale", r: 0.47 }] },
+    ocb: { name: "OCB", type: "outcome", short: "OCB", avgR: 0.44, sprite: "🤝", indicators: [{ name: "OCBI Items", r: 0.46 }, { name: "OCBO Items", r: 0.42 }, { name: "Altruism", r: 0.44 }] }
 };
 
 const TRUE_VALIDITY = {
@@ -785,6 +893,112 @@ function selectAIDifficulty(key) {
     session.aiDifficulty = key;
     updateAIDifficultyUI();
 }
+
+function showCardGallery() {
+    renderCardGallery();
+    document.getElementById('card-gallery-modal').classList.add('active');
+}
+
+function closeCardGallery() {
+    document.getElementById('card-gallery-modal').classList.remove('active');
+}
+
+function renderGalleryCard(card) {
+    return `
+        <article class="gallery-card ${card.cssClass}">
+            <div class="gallery-badge">${card.badge}</div>
+            <div class="gallery-name">${card.name}</div>
+            <div class="gallery-icon">${card.icon}</div>
+            <div class="gallery-copy">${card.copy}</div>
+        </article>
+    `;
+}
+
+function renderGallerySection(title, cards) {
+    return `
+        <section class="gallery-section">
+            <div class="gallery-section-title">${title}</div>
+            <div class="gallery-cards-row">${cards.map(renderGalleryCard).join('')}</div>
+        </section>
+    `;
+}
+
+function renderCardGallery() {
+    const container = document.getElementById('card-gallery-content');
+    if (!container) return;
+
+    const predictorCards = Object.entries(CONSTRUCTS)
+        .filter(([, c]) => c.type === 'predictor')
+        .flatMap(([id, c]) => (c.indicators || []).map(ind => ({
+            cssClass: 'predictor',
+            badge: 'PREDICTOR SCALE',
+            name: `${c.short} — ${ind.name}`,
+            icon: c.sprite || LOCAL_SPRITES[id] || '🧠',
+            copy: `${c.name} · r=${ind.r.toFixed(2)}`
+        })));
+
+    const outcomeCards = Object.entries(CONSTRUCTS)
+        .filter(([, c]) => c.type === 'outcome')
+        .flatMap(([id, c]) => (c.indicators || []).map(ind => ({
+            cssClass: 'outcome',
+            badge: 'OUTCOME SCALE',
+            name: `${c.short} — ${ind.name}`,
+            icon: c.sprite || LOCAL_SPRITES[id] || '🎯',
+            copy: `${c.name} · r=${ind.r.toFixed(2)}`
+        })));
+
+    const monsters = [];
+    const predictors = Object.keys(TRUE_VALIDITY);
+    predictors.forEach(predId => {
+        Object.entries(TRUE_VALIDITY[predId]).forEach(([outId, validity]) => {
+            monsters.push({
+                cssClass: 'monster',
+                badge: 'MONSTER',
+                name: getFunMonsterName(predId, outId),
+                icon: getMonsterSpriteForPair(predId, outId),
+                copy: `${CONSTRUCTS[predId].short} × ${CONSTRUCTS[outId].short} · rₜ=${validity.toFixed(2)}`
+            });
+        });
+    });
+
+    const spells = Object.values(LOCAL_SPELL_CARDS)
+        .filter(c => c.type === 'spell' || c.type === 'resource')
+        .map(c => ({
+            cssClass: 'spell',
+            badge: c.type === 'resource' ? 'SPELL / RESOURCE' : 'SPELL',
+            name: c.name,
+            icon: c.icon,
+            copy: c.desc
+        }));
+
+    const traps = Object.values(LOCAL_SPELL_CARDS)
+        .filter(c => c.type === 'trap')
+        .map(c => ({
+            cssClass: 'trap',
+            badge: 'TRAP',
+            name: c.name,
+            icon: c.icon,
+            copy: c.desc
+        }));
+
+    const meta = [{
+        cssClass: 'meta',
+        badge: 'META',
+        name: 'Meta-Analytic Titan',
+        icon: '∞',
+        copy: 'Fuse 3 monsters. Keeps strongest effect estimate and powers late-game swings.'
+    }];
+
+    container.innerHTML = [
+        renderGallerySection('Predictors', predictorCards),
+        renderGallerySection('Outcome', outcomeCards),
+        renderGallerySection('Monsters', monsters),
+        renderGallerySection('Spells', spells),
+        renderGallerySection('Traps', traps),
+        renderGallerySection('Meta', meta)
+    ].join('');
+}
+
 let localGame = null;
 
 const LOCAL_SPRITES = {
@@ -901,17 +1115,21 @@ function refreshMonsterStats(m) {
     m.power = approxPowerFromROBSandN(m.rObs, m.n);
 }
 
-function makeItemCard(constructId) {
+function makeItemCard(constructId, indicatorIndex = null) {
     const c = CONSTRUCTS[constructId];
+    const indicators = c.indicators?.length ? c.indicators : [{ name: c.type === 'predictor' ? 'Item indicator' : 'Criterion indicator', r: c.avgR }];
+    const picked = indicatorIndex === null
+        ? indicators[randInt(0, indicators.length - 1)]
+        : indicators[indicatorIndex % indicators.length];
     return {
         isItem: true,
         type: c.type,
         constructId,
         construct: c.name,
         short: c.short,
-        avgR: c.avgR,
-        sprite: LOCAL_SPRITES[constructId] || '●',
-        indicator: c.type === 'predictor' ? 'Item indicator' : 'Criterion indicator'
+        avgR: picked.r,
+        sprite: c.sprite || LOCAL_SPRITES[constructId] || '●',
+        indicator: picked.name
     };
 }
 function makeSpellCard(id) {
@@ -931,8 +1149,10 @@ function buildStartingDeck() {
     };
     Object.entries(counts).forEach(([id, n]) => {
         for (let i = 0; i < n; i++) {
-            if (CONSTRUCTS[id]) deck.push(makeItemCard(id));
-            else deck.push(makeSpellCard(id));
+            if (CONSTRUCTS[id]) {
+                const indicators = CONSTRUCTS[id].indicators || [];
+                deck.push(makeItemCard(id, indicators.length ? i : null));
+            } else deck.push(makeSpellCard(id));
         }
     });
     return shuffle(deck);
