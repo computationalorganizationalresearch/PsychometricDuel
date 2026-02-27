@@ -138,7 +138,7 @@ function refreshMonsterStats(&$m) {
     $predAlpha = max(0.05, $m['predAlpha'] ?? 0.05);
     $outAlpha = max(0.05, $m['outAlpha'] ?? 0.05);
     $m['rObs'] = ($m['rTrue'] ?? 0) * sqrt($predAlpha * $outAlpha);
-    $m['baseAtk'] = clamp((int) round(abs($m['rObs']) * 5200), 300, 3200);
+    $m['baseAtk'] = (int) round(abs($m['rObs']) * 10000);
 
     if (!empty($m['rangeRestricted'])) $m['atk'] = max(100, (int) floor($m['baseAtk'] / 2));
     else $m['atk'] = $m['baseAtk'];
@@ -151,7 +151,7 @@ function consumeAttackSample(&$monster) {
     if (!empty($monster['hasReplication'])) {
         $monster['hasReplication'] = false;
     } else {
-        $monster['n'] = !empty($monster['isMeta']) ? META_BASE_N : MONSTER_BASE_N;
+        $monster['n'] = !empty($monster['isMeta']) ? META_BASE_N : ($monster['baseN'] ?? MONSTER_BASE_N);
     }
     refreshMonsterStats($monster);
 }
@@ -179,8 +179,8 @@ function buildDeck() {
         'cog_ability'=>4,'conscient'=>4,'struct_int'=>4,'work_sample'=>4,
         'job_perf'=>4,'turnover'=>4,'job_sat'=>4,'ocb'=>4,
         'sample_size'=>5,'replication'=>3,'missing_data'=>3,'range_restrict'=>4,'correction'=>3,
-        'bootstrapping'=>4,'cross_validate'=>3,'item_analysis'=>3,
-        'ceiling_effect'=>3,'construct_drift'=>3,'criterion_contam'=>3,
+        'bootstrapping'=>4,'item_analysis'=>3,
+        'construct_drift'=>3,'criterion_contam'=>3,
     ];
 
     $spellDefs = [
@@ -188,13 +188,11 @@ function buildDeck() {
         'replication'=>['spell','Replication','⟳','Target your monster. Grants an extra attack and preserves N for one attack.'],
         'missing_data'=>['spell','Missing Data','∅','Destroy any card on the field.'],
         'range_restrict'=>['trap','Range Restriction','↔','Target enemy monster. Halve ATK.'],
-        'correction'=>['resource','Correction','↺','Target your monster. Restore ATK to max.'],
-        'bootstrapping'=>['spell','Bootstrapping','🧮','Target your monster. +60 N via resampling support.'],
-        'cross_validate'=>['spell','Cross-Validation','⧉','Target your monster. +40 N and grant an extra attack window.'],
-        'item_analysis'=>['spell','Item Analysis','🧩','Target your construct stack. Add one matching item (max 3) to improve reliability.'],
-        'ceiling_effect'=>['trap','Ceiling Effect','⌈⌉','Target enemy monster. Compress variance by resetting N to pilot levels.'],
+        'correction'=>['resource','Correction for Attenuation','↺','Target your monster. Set ATK to r_true × 10,000 for this turn.'],
+        'bootstrapping'=>['spell','Bootstrapping','🧮','Target your monster. Permanently increase its base N by 30.'],
+        'item_analysis'=>['spell','Automated Item Generation','🧩','Target your construct stack. Add one matching item (max 3) to improve reliability.'],
         'construct_drift'=>['trap','Construct Drift','↘','Target enemy construct. Remove one stacked item (or destroy stack if only one).'],
-        'criterion_contam'=>['trap','Criterion Contam.','⚠','Target enemy monster. Reduce N by 80, lowering power.'],
+        'criterion_contam'=>['trap','Attrition','⚠','Target enemy monster. Permanently halve N.'],
     ];
 
     $deck = [];
@@ -445,6 +443,7 @@ function moveSummon(&$state, &$me, $pNum, $move) {
         'rObs' => 0,
         'baseAtk' => 0,
         'atk' => 0,
+        'baseN' => MONSTER_BASE_N,
         'n' => MONSTER_BASE_N,
         'power' => 0.05,
         'attacksMade' => 0,
@@ -503,35 +502,27 @@ function movePlaySpell(&$state, &$me, &$opp, $pNum, $move) {
         $opp['monsters'][$targetSlot]['rangeRestricted'] = true;
         refreshMonsterStats($opp['monsters'][$targetSlot]);
     } elseif ($id === 'correction') {
-        if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Correction must target your monster'];
+        if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Correction for Attenuation must target your monster'];
         $me['monsters'][$targetSlot]['rangeRestricted'] = false;
-        refreshMonsterStats($me['monsters'][$targetSlot]);
+        $me['monsters'][$targetSlot]['atk'] = (int) round(abs($me['monsters'][$targetSlot]['rTrue'] ?? 0) * 10000);
     } elseif ($id === 'bootstrapping') {
         if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Bootstrapping must target your monster'];
-        $me['monsters'][$targetSlot]['n'] = clamp(($me['monsters'][$targetSlot]['n'] ?? MONSTER_BASE_N) + 60, MONSTER_BASE_N, 420);
-        refreshMonsterStats($me['monsters'][$targetSlot]);
-    } elseif ($id === 'cross_validate') {
-        if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Cross-Validation must target your monster'];
-        $me['monsters'][$targetSlot]['n'] = clamp(($me['monsters'][$targetSlot]['n'] ?? MONSTER_BASE_N) + 40, MONSTER_BASE_N, 420);
-        $me['monsters'][$targetSlot]['hasReplication'] = true;
-        $me['monsters'][$targetSlot]['maxAttacks'] = max($me['monsters'][$targetSlot]['maxAttacks'], 2);
+        $me['monsters'][$targetSlot]['baseN'] = ($me['monsters'][$targetSlot]['baseN'] ?? MONSTER_BASE_N) + 30;
+        $me['monsters'][$targetSlot]['n'] = ($me['monsters'][$targetSlot]['n'] ?? MONSTER_BASE_N) + 30;
         refreshMonsterStats($me['monsters'][$targetSlot]);
     } elseif ($id === 'item_analysis') {
-        if ($targetType !== 'construct' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Item Analysis must target your construct'];
+        if ($targetType !== 'construct' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Automated Item Generation must target your construct'];
         if (count($me['constructs'][$targetSlot]['cards']) >= 3) return ['ok'=>false,'msg'=>'Construct stack already at maximum size'];
         $last = end($me['constructs'][$targetSlot]['cards']);
         $me['constructs'][$targetSlot]['cards'][] = $last;
-    } elseif ($id === 'ceiling_effect') {
-        if ($targetType !== 'monster' || $targetOwner !== 'opp') return ['ok'=>false,'msg'=>'Ceiling Effect must target enemy monster'];
-        $opp['monsters'][$targetSlot]['n'] = MONSTER_BASE_N;
-        refreshMonsterStats($opp['monsters'][$targetSlot]);
     } elseif ($id === 'construct_drift') {
         if ($targetType !== 'construct' || $targetOwner !== 'opp') return ['ok'=>false,'msg'=>'Construct Drift must target enemy construct'];
         if (count($opp['constructs'][$targetSlot]['cards']) > 1) array_pop($opp['constructs'][$targetSlot]['cards']);
         else $opp['constructs'][$targetSlot] = null;
     } elseif ($id === 'criterion_contam') {
-        if ($targetType !== 'monster' || $targetOwner !== 'opp') return ['ok'=>false,'msg'=>'Criterion Contam. must target enemy monster'];
-        $opp['monsters'][$targetSlot]['n'] = clamp(($opp['monsters'][$targetSlot]['n'] ?? MONSTER_BASE_N) - 80, MONSTER_BASE_N, 420);
+        if ($targetType !== 'monster' || $targetOwner !== 'opp') return ['ok'=>false,'msg'=>'Attrition must target enemy monster'];
+        $opp['monsters'][$targetSlot]['n'] = max(1, (int) floor(($opp['monsters'][$targetSlot]['n'] ?? MONSTER_BASE_N) / 2));
+        $opp['monsters'][$targetSlot]['baseN'] = max(1, (int) floor(($opp['monsters'][$targetSlot]['baseN'] ?? MONSTER_BASE_N) / 2));
         refreshMonsterStats($opp['monsters'][$targetSlot]);
     } else {
         return ['ok'=>false,'msg'=>'Unknown card effect'];
@@ -651,6 +642,7 @@ function resetMonstersForTurn(&$player) {
         $m['summoningSick'] = false;
         $m['attacksMade'] = 0;
         $m['maxAttacks'] = !empty($m['isMeta']) ? 2 : (!empty($m['hasReplication']) ? 2 : 1);
+        refreshMonsterStats($m);
     }
 }
 

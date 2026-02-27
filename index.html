@@ -534,7 +534,7 @@
             • <span style="color:var(--spell)">Missing Data</span>: destroy any card on the field (monster or construct). Great for disrupting stacked constructs or removing a dangerous monster.<br>
             • <span style="color:var(--spell)">Replication</span>: target your monster; grants an extra attack and preserves N for an additional strike window.<br>
             • <span style="color:var(--trap)">Range Restriction</span>: target enemy monster; halves its ATK (attenuation in action).<br>
-            • <span style="color:var(--gold)">Correction</span>: target your monster; restores ATK to its maximum (undoes prior attenuation penalties).
+            • <span style="color:var(--gold)">Correction for Attenuation</span>: target your monster; sets ATK to r_true × 10,000 for one turn.
             </p>
 
             <h3>8. META Phase (Meta-Analysis Ultimate Summon)</h3>
@@ -797,16 +797,14 @@ const LOCAL_SPELL_CARDS = {
     replication: { id: 'replication', type: 'spell', icon: '⟳', name: 'Replication', desc: 'Target your monster. Grants an extra attack and preserves N for one attack.' },
     missing_data: { id: 'missing_data', type: 'spell', icon: '∅', name: 'Missing Data', desc: 'Destroy any card on the field.' },
     range_restrict: { id: 'range_restrict', type: 'trap', icon: '↔', name: 'Range Restriction', desc: 'Target enemy monster. Halve ATK.' },
-    correction: { id: 'correction', type: 'resource', icon: '↺', name: 'Correction', desc: 'Target your monster. Restore ATK to max.' },
+    correction: { id: 'correction', type: 'resource', icon: '↺', name: 'Correction for Attenuation', desc: 'Target your monster. Set ATK to r_true × 10,000 for this turn.' },
 
     // New psychometrically relevant support / disruption cards
-    bootstrapping: { id: 'bootstrapping', type: 'spell', icon: '🧮', name: 'Bootstrapping', desc: 'Target your monster. +60 N via resampling support.' },
-    cross_validate: { id: 'cross_validate', type: 'spell', icon: '⧉', name: 'Cross-Validation', desc: 'Target your monster. +40 N and grant an extra attack window.' },
-    item_analysis: { id: 'item_analysis', type: 'spell', icon: '🧩', name: 'Item Analysis', desc: 'Target your construct stack. Add one matching item (max 3) to improve reliability.' },
+    bootstrapping: { id: 'bootstrapping', type: 'spell', icon: '🧮', name: 'Bootstrapping', desc: 'Target your monster. Permanently increase its base N by 30.' },
+    item_analysis: { id: 'item_analysis', type: 'spell', icon: '🧩', name: 'Automated Item Generation', desc: 'Target your construct stack. Add one matching item (max 3) to improve reliability.' },
 
-    ceiling_effect: { id: 'ceiling_effect', type: 'trap', icon: '⌈⌉', name: 'Ceiling Effect', desc: 'Target enemy monster. Compress variance by resetting N to pilot levels.' },
     construct_drift: { id: 'construct_drift', type: 'trap', icon: '↘', name: 'Construct Drift', desc: 'Target enemy construct. Remove one stacked item (or destroy stack if only one).' },
-    criterion_contam: { id: 'criterion_contam', type: 'trap', icon: '⚠', name: 'Criterion Contam.', desc: 'Target enemy monster. Reduce N by 80, lowering power.' }
+    criterion_contam: { id: 'criterion_contam', type: 'trap', icon: '⚠', name: 'Attrition', desc: 'Target enemy monster. Permanently halve N.' }
 };
 
 function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
@@ -897,7 +895,7 @@ function refreshMonsterStats(m) {
         return;
     }
     m.rObs = m.rTrue * Math.sqrt(Math.max(0.05, m.predAlpha) * Math.max(0.05, m.outAlpha));
-    m.baseAtk = clamp(Math.round(Math.abs(m.rObs) * 5200), 300, 3200);
+    m.baseAtk = Math.round(Math.abs(m.rObs) * 10000);
     if (!m.rangeRestricted) m.atk = m.baseAtk;
     else m.atk = Math.max(100, Math.floor(m.baseAtk / 2));
     m.power = approxPowerFromROBSandN(m.rObs, m.n);
@@ -928,8 +926,8 @@ function buildStartingDeck() {
         sample_size: 5, replication: 3, missing_data: 3, range_restrict: 4, correction: 3,
 
         // New additions
-        bootstrapping: 4, cross_validate: 3, item_analysis: 3,
-        ceiling_effect: 3, construct_drift: 3, criterion_contam: 3
+        bootstrapping: 4, item_analysis: 3,
+        construct_drift: 3, criterion_contam: 3
     };
     Object.entries(counts).forEach(([id, n]) => {
         for (let i = 0; i < n; i++) {
@@ -979,6 +977,7 @@ function buildMonster(predStack, outStack) {
         rObs: 0,
         baseAtk: 0,
         atk: 0,
+        baseN: 20,
         n: 20,
         power: 0.1,
         attacksMade: 0,
@@ -1051,6 +1050,7 @@ function startTurnFor(pid) {
             m.summoningSick = false;
             m.attacksMade = 0;
             m.maxAttacks = m.isMeta ? 2 : (m.hasReplication ? 2 : 1);
+            refreshMonsterStats(m);
         }
     });
     logLocal(`P${pid} draws a card.`, 'info-log');
@@ -1184,7 +1184,7 @@ function consumeAttackSample(monster) {
     if (preserve) {
         monster.hasReplication = false;
     } else {
-        monster.n = 20;
+        monster.n = monster.isMeta ? 220 : (monster.baseN ?? 20);
     }
     if (!monster.isMeta) {
         refreshMonsterStats(monster);
@@ -1309,39 +1309,24 @@ function applyLocalMove(pid, move) {
             logLocal(`P${pid} applies Range Restriction to ${target.name}. ATK reduced to ${target.atk}.`, 'spell-log');
         }
         else if (card.id === 'correction') {
-            if (move.target_type !== 'monster' || targetPlayer !== me) return { success: false, message: 'Correction must target your monster' };
+            if (move.target_type !== 'monster' || targetPlayer !== me) return { success: false, message: 'Correction for Attenuation must target your monster' };
             target.rangeRestricted = false;
-            target.atk = target.baseAtk ?? target.atk;
-            logLocal(`P${pid} applies Correction to ${target.name}. ATK restored to ${target.atk}.`, 'spell-log');
+            target.atk = Math.round(Math.abs(target.rTrue ?? 0) * 10000);
+            logLocal(`P${pid} applies Correction for Attenuation to ${target.name}. ATK becomes ${target.atk} for this turn.`, 'spell-log');
         }
         else if (card.id === 'bootstrapping') {
             if (move.target_type !== 'monster' || targetPlayer !== me) return { success: false, message: 'Bootstrapping must target your monster' };
-            target.n = clamp(target.n + 60, 20, 420);
+            target.baseN = (target.baseN ?? 20) + 30;
+            target.n = (target.n ?? 20) + 30;
             if (!target.isMeta) refreshMonsterStats(target);
             else target.power = clamp(0.9 + (target.n / 1200), 0.9, 0.99);
-            logLocal(`P${pid} plays Bootstrapping on ${target.name}. N increases to ${target.n}.`, 'spell-log');
-        }
-        else if (card.id === 'cross_validate') {
-            if (move.target_type !== 'monster' || targetPlayer !== me) return { success: false, message: 'Cross-Validation must target your monster' };
-            target.n = clamp(target.n + 40, 20, 420);
-            target.hasReplication = true;
-            target.maxAttacks = Math.max(target.maxAttacks, 2);
-            if (!target.isMeta) refreshMonsterStats(target);
-            else target.power = clamp(0.9 + (target.n / 1200), 0.9, 0.99);
-            logLocal(`P${pid} plays Cross-Validation on ${target.name}. +40 N and extra attack window granted.`, 'spell-log');
+            logLocal(`P${pid} plays Bootstrapping on ${target.name}. Base N is now ${target.baseN}.`, 'spell-log');
         }
         else if (card.id === 'item_analysis') {
-            if (move.target_type !== 'construct' || targetPlayer !== me) return { success: false, message: 'Item Analysis must target your construct stack' };
+            if (move.target_type !== 'construct' || targetPlayer !== me) return { success: false, message: 'Automated Item Generation must target your construct stack' };
             if (target.cards.length >= 3) return { success: false, message: 'Construct stack already at maximum size' };
             target.cards.push(deepClone(target.cards[target.cards.length - 1]));
-            logLocal(`P${pid} plays Item Analysis on ${target.cards[0].construct}. Stack grows to ${target.cards.length}.`, 'spell-log');
-        }
-        else if (card.id === 'ceiling_effect') {
-            if (move.target_type !== 'monster' || targetPlayer !== opp) return { success: false, message: 'Ceiling Effect must target an enemy monster' };
-            target.n = 20;
-            if (!target.isMeta) refreshMonsterStats(target);
-            else target.power = clamp(0.9 + (target.n / 1200), 0.9, 0.99);
-            logLocal(`P${pid} applies Ceiling Effect to ${target.name}. N resets to pilot level (${target.n}).`, 'spell-log');
+            logLocal(`P${pid} plays Automated Item Generation on ${target.cards[0].construct}. Stack grows to ${target.cards.length}.`, 'spell-log');
         }
         else if (card.id === 'construct_drift') {
             if (move.target_type !== 'construct' || targetPlayer !== opp) return { success: false, message: 'Construct Drift must target an enemy construct' };
@@ -1355,11 +1340,12 @@ function applyLocalMove(pid, move) {
             }
         }
         else if (card.id === 'criterion_contam') {
-            if (move.target_type !== 'monster' || targetPlayer !== opp) return { success: false, message: 'Criterion Contamination must target an enemy monster' };
-            target.n = clamp(target.n - 80, 20, 420);
+            if (move.target_type !== 'monster' || targetPlayer !== opp) return { success: false, message: 'Attrition must target an enemy monster' };
+            target.n = Math.max(1, Math.floor(target.n / 2));
+            target.baseN = Math.max(1, Math.floor((target.baseN ?? 20) / 2));
             if (!target.isMeta) refreshMonsterStats(target);
             else target.power = clamp(0.9 + (target.n / 1200), 0.9, 0.99);
-            logLocal(`P${pid} applies Criterion Contamination to ${target.name}. N reduced to ${target.n}.`, 'spell-log');
+            logLocal(`P${pid} applies Attrition to ${target.name}. Base N is now ${target.baseN}.`, 'spell-log');
         }
         else {
             return { success: false, message: 'Unknown card effect' };
@@ -1548,22 +1534,6 @@ function aiUseSupport(pid) {
         }
         if (performed) continue;
 
-        // Cross-Validation on strongest available attacker
-        cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'cross_validate');
-        if (cIdx !== -1) {
-            let target = -1, score = 0;
-            p.monsters.forEach((m, i) => {
-                if (!canMonsterAttack(m)) return;
-                const s = m.atk * m.power;
-                if (s > score) { score = s; target = i; }
-            });
-            if (target !== -1 && score >= ai.replicationThreshold * 0.9) {
-                applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'me', target_type: 'monster', target_slot: target });
-                acted = performed = true;
-            }
-        }
-        if (performed) continue;
-
         // Sample Size on strongest available attacker until decent power
         cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'sample_size');
         if (cIdx !== -1) {
@@ -1602,7 +1572,7 @@ function aiUseSupport(pid) {
         }
         if (performed) continue;
 
-        // Item Analysis on best own construct stack below cap
+        // Automated Item Generation on best own construct stack below cap
         cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'item_analysis');
         if (cIdx !== -1) {
             let target = -1, best = -1;
@@ -1632,8 +1602,8 @@ function aiUseSupport(pid) {
         }
         if (performed) continue;
 
-        // Ceiling Effect / Criterion Contamination on highest threat enemy monster
-        cIdx = p.hand.findIndex(c => !c.isItem && (c.id === 'ceiling_effect' || c.id === 'criterion_contam'));
+        // Attrition on highest threat enemy monster
+        cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'criterion_contam');
         if (cIdx !== -1) {
             let target = -1, threat = 0;
             enemy.monsters.forEach((m, i) => {
@@ -2018,9 +1988,6 @@ function renderMonsterSlot(slotIdx, owner) {
     if (uiPhase === 'spell_target_range' && owner === 'opp' && m) {
         slot.classList.add('spell-target');
         slot.onclick = () => executeRangeRestrict(slotIdx);
-    } else if (uiPhase === 'spell_target_ceiling_effect' && owner === 'opp' && m) {
-        slot.classList.add('spell-target');
-        slot.onclick = () => executeCeilingEffect(slotIdx);
     } else if (uiPhase === 'spell_target_criterion_contam' && owner === 'opp' && m) {
         slot.classList.add('spell-target');
         slot.onclick = () => executeCriterionContam(slotIdx);
@@ -2033,9 +2000,6 @@ function renderMonsterSlot(slotIdx, owner) {
     } else if (uiPhase === 'spell_target_bootstrapping' && owner === 'player' && m) {
         slot.classList.add('spell-target');
         slot.onclick = () => executeBootstrapping(slotIdx);
-    } else if (uiPhase === 'spell_target_cross_validate' && owner === 'player' && m) {
-        slot.classList.add('spell-target');
-        slot.onclick = () => executeCrossValidate(slotIdx);
     } else if (uiPhase === 'spell_target_missing_data' && m) {
         slot.classList.add('spell-target');
         slot.onclick = () => executeMissingData(slotIdx, owner, 'monster');
@@ -2408,12 +2372,8 @@ function selectHandCard(idx) {
             uiPhase = 'spell_target_replication';
         } else if (card.id === 'bootstrapping') {
             uiPhase = 'spell_target_bootstrapping';
-        } else if (card.id === 'cross_validate') {
-            uiPhase = 'spell_target_cross_validate';
         } else if (card.id === 'item_analysis') {
             uiPhase = 'spell_target_item_analysis';
-        } else if (card.id === 'ceiling_effect') {
-            uiPhase = 'spell_target_ceiling_effect';
         } else if (card.id === 'construct_drift') {
             uiPhase = 'spell_target_construct_drift';
         } else if (card.id === 'criterion_contam') {
@@ -2526,23 +2486,9 @@ async function executeBootstrapping(slotIdx) {
     selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
 }
 
-async function executeCrossValidate(slotIdx) {
-    if (uiPhase !== 'spell_target_cross_validate') return;
-    await submitMove({ type: 'play_spell', hand_index: selectedHandCard, target_owner: 'me', target_type: 'monster', target_slot: slotIdx });
-    triggerFlash('heal');
-    selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
-}
-
 async function executeItemAnalysis(slotIdx) {
     if (uiPhase !== 'spell_target_item_analysis') return;
     await submitMove({ type: 'play_spell', hand_index: selectedHandCard, target_owner: 'me', target_type: 'construct', target_slot: slotIdx });
-    triggerFlash('heal');
-    selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
-}
-
-async function executeCeilingEffect(slotIdx) {
-    if (uiPhase !== 'spell_target_ceiling_effect') return;
-    await submitMove({ type: 'play_spell', hand_index: selectedHandCard, target_owner: 'opp', target_type: 'monster', target_slot: slotIdx });
     triggerFlash('heal');
     selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
 }
@@ -2567,7 +2513,6 @@ function onMonsterSlotClick(slotIdx) {
     if (uiPhase === 'spell_target_sample_size') executeSampleSize(slotIdx);
     if (uiPhase === 'spell_target_replication') executeReplication(slotIdx);
     if (uiPhase === 'spell_target_bootstrapping') executeBootstrapping(slotIdx);
-    if (uiPhase === 'spell_target_cross_validate') executeCrossValidate(slotIdx);
 }
 
 // --- Attack ---
