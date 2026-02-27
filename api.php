@@ -16,7 +16,7 @@ if (!is_dir($DATA_DIR)) mkdir($DATA_DIR, 0777, true);
 const MAX_HAND_SIZE = 10;
 const STARTING_HAND_SIZE = 10;
 const MONSTER_BASE_N = 20;
-const META_BASE_N = 220;
+const META_BASE_N = 20;
 
 $MONSTER_SPRITES = ['⚔️','🐉','🦁','🔥','💎','🌟','🗡️','🛡️','👁️','🌀'];
 

@@ -1006,7 +1006,8 @@ function buildMetaMonster(monsters) {
         rObs: clamp(meanR * 1.25, 0.35, 0.9),
         baseAtk: clamp(Math.round(meanAtk * 1.45), 2400, 5200),
         atk: 0,
-        n: 220,
+        baseN: 20,
+        n: 20,
         power: 0.97,
         attacksMade: 0,
         maxAttacks: 2,
@@ -1184,7 +1185,7 @@ function consumeAttackSample(monster) {
     if (preserve) {
         monster.hasReplication = false;
     } else {
-        monster.n = monster.isMeta ? 220 : (monster.baseN ?? 20);
+        monster.n = monster.baseN ?? 20;
     }
     if (!monster.isMeta) {
         refreshMonsterStats(monster);
