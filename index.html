@@ -1188,8 +1188,8 @@ const LOCAL_SPRITES = {
 
 const LOCAL_SPELL_CARDS = {
     sample_size: { id: 'sample_size', type: 'resource', icon: 'N+100', name: 'Sample Size', desc: 'Increase target friendly monster sample size (N), boosting power.' },
-    job_relevance: { id: 'job_relevance', type: 'spell', icon: '📌', name: 'Job Relevance', desc: 'Equip to your monster. Monsters with ★★★☆☆ or less need this to attack.' },
-    imputation: { id: 'imputation', type: 'spell', icon: '🩹', name: 'Imputation', desc: 'Equip to your monster. If Missing Data targets it, Imputation is destroyed instead.' },
+    job_relevance: { id: 'job_relevance', type: 'spell', icon: '📌', name: 'Job Relevance', desc: 'Equip to your monster. Monsters with ★★★☆☆ or less need this to attack.', equip: { key: 'hasJobRelevance', battleSummary: (monster) => monster.requiresJobRelevance ? 'Allows this low-fairness monster to attack.' : 'Equipped with no current attack restriction to bypass.' } },
+    imputation: { id: 'imputation', type: 'spell', icon: '🩹', name: 'Imputation', desc: 'Equip to your monster. If Missing Data targets it, Imputation is destroyed instead.', equip: { key: 'hasImputation', battleSummary: 'No attack change; will absorb Missing Data if targeted.' } },
     missing_data: { id: 'missing_data', type: 'trap', icon: '∅', name: 'Missing Data', desc: 'Destroy any card on the field.' },
     range_restrict: { id: 'range_restrict', type: 'trap', icon: '↔', name: 'Range Restriction', desc: 'Target enemy monster. Halve ATK.' },
     correction: { id: 'correction', type: 'resource', icon: '↺', name: 'Correction for Attenuation', desc: 'Target your monster. Set ATK to r_true × 10,000 for this turn.' },
@@ -1200,9 +1200,24 @@ const LOCAL_SPELL_CARDS = {
 
     construct_drift: { id: 'construct_drift', type: 'trap', icon: '↘', name: 'Construct Drift', desc: 'Target enemy construct. Remove one stacked item (or destroy stack if only one).' },
     criterion_contam: { id: 'criterion_contam', type: 'trap', icon: '⚠', name: 'Attrition', desc: 'Target enemy monster. Permanently halve N.' },
-    p_hacking: { id: 'p_hacking', type: 'spell', icon: '🎯', name: 'P-hacking', desc: 'Equip to your monster. Its next attack cannot miss, then it is destroyed at the end of that attack.' },
-    practice_effect: { id: 'practice_effect', type: 'trap', icon: '🌀', name: 'Practice Effect', desc: 'Equip to a monster. After it attacks, halve its current validity coefficient.' }
+    p_hacking: { id: 'p_hacking', type: 'spell', icon: '🎯', name: 'P-hacking', desc: 'Equip to your monster. Its next attack cannot miss, then it is destroyed at the end of that attack.', equip: { key: 'hasPHacking', battleSummary: 'Guarantees this attack hits, then destroys the monster.' } },
+    practice_effect: { id: 'practice_effect', type: 'trap', icon: '🌀', name: 'Practice Effect', desc: 'Equip to a monster. After it attacks, halve its current validity coefficient.', equip: { key: 'hasPracticeEffect', battleSummary: 'After attacking, halves current validity coefficient.' } }
 };
+
+function getEquippedSpellCards(monster) {
+    if (!monster) return [];
+    return Object.values(LOCAL_SPELL_CARDS).filter(card => card.equip?.key && monster[card.equip.key]);
+}
+
+function logEquippedBattleEffects(pid, monster) {
+    const equips = getEquippedSpellCards(monster);
+    equips.forEach(card => {
+        const summary = typeof card.equip?.battleSummary === 'function'
+            ? card.equip.battleSummary(monster)
+            : (card.equip?.battleSummary || card.desc || 'Equipped effect is active.');
+        logLocal(`P${pid}'s ${monster.name}: ${card.name} effect active — ${summary}`, 'battle-log');
+    });
+}
 
 function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
 function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
@@ -1616,14 +1631,32 @@ function projectStateForPlayer(pid) {
     };
 }
 function consumeAttackSample(monster) {
-    if (!monster) return;
-    if (monster.hasPracticeEffect) monster.validityMultiplier = Math.max(0.03125, (monster.validityMultiplier ?? 1) / 2);
+    if (!monster) return null;
+    const beforeCoeff = getPowerValidityCoefficient(monster);
+    const beforeAtk = monster.atk ?? 0;
+    const beforePowerPct = Math.floor((monster.power ?? 0) * 100);
+    let practiceEffectApplied = false;
+
+    if (monster.hasPracticeEffect) {
+        monster.validityMultiplier = Math.max(0.03125, (monster.validityMultiplier ?? 1) / 2);
+        practiceEffectApplied = true;
+    }
     monster.n = monster.baseN ?? 20;
     if (!monster.isMeta) {
         refreshMonsterStats(monster);
     } else {
         monster.power = clamp(0.9 + (monster.n / 1200), 0.9, 0.99);
     }
+
+    return {
+        practiceEffectApplied,
+        beforeCoeff,
+        afterCoeff: getPowerValidityCoefficient(monster),
+        beforeAtk,
+        afterAtk: monster.atk ?? beforeAtk,
+        beforePowerPct,
+        afterPowerPct: Math.floor((monster.power ?? 0) * 100)
+    };
 }
 function localCanMeta(player) {
     const m = player.monsters;
@@ -1824,23 +1857,26 @@ function applyLocalMove(pid, move) {
         const hit = isPHackingAttack || roll <= threshold;
         move_result = { roll, threshold, hit, attack_data: { damage: 0, outcome: 'tie' } };
 
+        logEquippedBattleEffects(pid, attacker);
+
         attacker.attacksMade += 1;
 
+        let attackSampleResult = null;
         if (!hit) {
             logLocal(`P${pid}'s ${attacker.name} attacks and rolls ${roll} (needs ≤ ${threshold}). Type II error — attack misses.`, 'battle-log');
-            consumeAttackSample(attacker);
+            attackSampleResult = consumeAttackSample(attacker);
         } else {
             if (move.target_type === 'lp') {
                 const dmg = attacker.atk;
                 opp.lp = Math.max(0, opp.lp - dmg);
                 move_result.attack_data = { damage: dmg, outcome: 'win' };
                 logLocal(`P${pid}'s ${attacker.name} attacks directly for ${dmg} LP damage!`, 'battle-log');
-                consumeAttackSample(attacker);
+                attackSampleResult = consumeAttackSample(attacker);
             } else {
                 const defender = opp.monsters[move.target_slot];
                 if (!defender) {
                     logLocal(`P${pid}'s attack fizzles: target no longer exists.`, 'error-log');
-                    consumeAttackSample(attacker);
+                    attackSampleResult = consumeAttackSample(attacker);
                 } else {
                     const outcome = localAttackResolution(attacker, defender);
                     if (outcome.outcome === 'win') {
@@ -1857,9 +1893,16 @@ function applyLocalMove(pid, move) {
                         logLocal(`P${pid}'s ${attacker.name} and ${defender.name} destroy each other.`, 'battle-log');
                     }
                     move_result.attack_data = { damage: outcome.damage, outcome: outcome.outcome };
-                    if (me.monsters[move.attacker_slot]) consumeAttackSample(me.monsters[move.attacker_slot]);
+                    if (me.monsters[move.attacker_slot]) attackSampleResult = consumeAttackSample(me.monsters[move.attacker_slot]);
                 }
             }
+        }
+
+        if (attackSampleResult?.practiceEffectApplied && me.monsters[move.attacker_slot]) {
+            logLocal(
+                `P${pid}'s ${me.monsters[move.attacker_slot].name}: Practice Effect resolves — validity coeff ${attackSampleResult.beforeCoeff.toFixed(3)} → ${attackSampleResult.afterCoeff.toFixed(3)}, ATK ${attackSampleResult.beforeAtk} → ${attackSampleResult.afterAtk}, PWR ${attackSampleResult.beforePowerPct}% → ${attackSampleResult.afterPowerPct}%.`,
+                'battle-log'
+            );
         }
 
         if (isPHackingAttack && me.monsters[move.attacker_slot]) {
