@@ -711,7 +711,12 @@ function moveAttack(&$state, &$me, &$opp, $pNum, $move) {
 
     $targetType = $move['target_type'] ?? 'lp';
     $targetSlot = (int)($move['target_slot'] ?? -1);
-    if ($targetType === 'monster' && empty($opp['monsters'][$targetSlot])) $targetType = 'lp';
+    $opponentHasMonsters = count(array_filter($opp['monsters'])) > 0;
+    if ($targetType === 'lp' && $opponentHasMonsters) return ['ok'=>false,'msg'=>'You must attack an enemy monster first'];
+    if ($targetType === 'monster' && empty($opp['monsters'][$targetSlot])) {
+        if ($opponentHasMonsters) return ['ok'=>false,'msg'=>'No defender in that slot'];
+        $targetType = 'lp';
+    }
 
     if ($targetType === 'lp') {
         $dmg = $attacker['atk'];
