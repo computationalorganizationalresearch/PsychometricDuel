@@ -217,10 +217,11 @@ function refreshMonsterStats(&$m) {
     $predAlpha = max(0.05, $m['predAlpha'] ?? 0.05);
     $outAlpha = max(0.05, $m['outAlpha'] ?? 0.05);
     $validityMultiplier = max(0, (float)($m['validityMultiplier'] ?? 1.0));
-    $m['rObs'] = (($m['rTrue'] ?? 0) * sqrt($predAlpha * $outAlpha)) * $validityMultiplier;
+    $effectiveValidityMultiplier = !empty($m['itemLeakageApplied']) ? 0.0 : $validityMultiplier;
+    $m['rObs'] = (($m['rTrue'] ?? 0) * sqrt($predAlpha * $outAlpha)) * $effectiveValidityMultiplier;
     $m['baseAtk'] = (int) round(abs($m['rObs']) * 10000);
 
-    $correctionBaseAtk = (int) round(abs($m['rTrue'] ?? 0) * $validityMultiplier * 10000);
+    $correctionBaseAtk = (int) round(abs($m['rTrue'] ?? 0) * $effectiveValidityMultiplier * 10000);
     $effectiveAtkBase = !empty($m['correctionApplied']) ? $correctionBaseAtk : $m['baseAtk'];
     $rangeStacks = max(0, (int)($m['rangeRestrictionStacks'] ?? 0));
     $atk = $effectiveAtkBase;
@@ -263,7 +264,7 @@ function buildDeck() {
     $counts = [
         'cog_ability'=>4,'conscient'=>4,'struct_int'=>4,'work_sample'=>4,
         'job_perf'=>4,'turnover'=>4,'job_sat'=>4,'ocb'=>4,
-        'sample_size'=>5,'job_relevance'=>4,'imputation'=>3,'missing_data'=>3,'range_restrict'=>4,'correction'=>3,'p_hacking'=>3,'practice_effect'=>3,
+        'sample_size'=>5,'job_relevance'=>4,'imputation'=>3,'missing_data'=>3,'range_restrict'=>4,'item_leakage'=>3,'correction'=>3,'p_hacking'=>3,'practice_effect'=>3,
         'bootstrapping'=>4,'item_analysis'=>3,
         'construct_drift'=>3,'criterion_contam'=>3,
     ];
@@ -274,6 +275,7 @@ function buildDeck() {
         'imputation'=>['spell','Imputation','🩹','Equip to your monster. If Missing Data targets it, Imputation is destroyed instead.'],
         'missing_data'=>['trap','Missing Data','∅','Destroy any card on the field.'],
         'range_restrict'=>['trap','Range Restriction','↔','Target enemy monster. Halve ATK.'],
+        'item_leakage'=>['trap','Item Leakage','💧','Target enemy monster. Set validity to 0 (ATK 0) for 1 turn.'],
         'correction'=>['resource','Correction for Attenuation','↺','Target your monster. Set ATK to r_true × 10,000 for this turn.'],
         'p_hacking'=>['spell','P-hacking','🎯','Equip to your monster. Its next attack cannot miss, then it is destroyed at the end of that attack.'],
         'practice_effect'=>['trap','Practice Effect','🌀','Equip to a monster. After it attacks, halve its current validity coefficient.'],
@@ -547,6 +549,7 @@ function moveSummon(&$state, &$me, $pNum, $move) {
         'hasImputation' => false,
         'hasPHacking' => false,
         'hasPracticeEffect' => false,
+        'itemLeakageApplied' => false,
         'correctionApplied' => false,
         'rangeRestrictionStacks' => 0,
         'validityMultiplier' => 1.0,
@@ -622,6 +625,10 @@ function movePlaySpell(&$state, &$me, &$opp, $pNum, $move) {
     } elseif ($id === 'range_restrict') {
         if ($targetType !== 'monster' || $targetOwner !== 'opp') return ['ok'=>false,'msg'=>'Range Restriction must target enemy monster'];
         $opp['monsters'][$targetSlot]['rangeRestrictionStacks'] = max(0, (int)($opp['monsters'][$targetSlot]['rangeRestrictionStacks'] ?? 0)) + 1;
+        refreshMonsterStats($opp['monsters'][$targetSlot]);
+    } elseif ($id === 'item_leakage') {
+        if ($targetType !== 'monster' || $targetOwner !== 'opp') return ['ok'=>false,'msg'=>'Item Leakage must target enemy monster'];
+        $opp['monsters'][$targetSlot]['itemLeakageApplied'] = true;
         refreshMonsterStats($opp['monsters'][$targetSlot]);
     } elseif ($id === 'correction') {
         if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Correction for Attenuation must target your monster'];
@@ -760,6 +767,7 @@ function moveMeta(&$state, &$me, $pNum) {
         'hasImputation' => false,
         'hasPHacking' => false,
         'hasPracticeEffect' => false,
+        'itemLeakageApplied' => false,
         'correctionApplied' => false,
         'rangeRestrictionStacks' => 0,
         'validityMultiplier' => 1.0,
@@ -791,9 +799,16 @@ function resetMonstersForTurn(&$player) {
 function clearEndOfTurnEffects(&$player) {
     foreach ($player['monsters'] as &$m) {
         if (!$m) continue;
-        if (empty($m['correctionApplied'])) continue;
-        $m['correctionApplied'] = false;
-        refreshMonsterStats($m);
+        $changed = false;
+        if (!empty($m['correctionApplied'])) {
+            $m['correctionApplied'] = false;
+            $changed = true;
+        }
+        if (!empty($m['itemLeakageApplied'])) {
+            $m['itemLeakageApplied'] = false;
+            $changed = true;
+        }
+        if ($changed) refreshMonsterStats($m);
     }
 }
 
