@@ -715,7 +715,8 @@
 
             <h3>7. Spells, Traps, and Timing Tips</h3>
             <p>
-            • <span style="color:var(--spell)">Missing Data</span>: destroy any card on the field (monster or construct). Great for disrupting stacked constructs or removing a dangerous monster.<br>
+            • <span style="color:var(--trap)">Missing Data</span>: destroy any card on the field (monster or construct). Great for disrupting stacked constructs or removing a dangerous monster.<br>
+            • <span style="color:var(--spell)">P-hacking</span>: equip to your monster. Its next attack cannot miss, but the equipped monster is destroyed after that attack.<br>
             • <span style="color:var(--spell)">Job Relevance</span>: equip to your monster. Monsters with 3 stars or fewer need it to attack.<br>
             • <span style="color:var(--trap)">Range Restriction</span>: target enemy monster; halves its ATK (attenuation in action).<br>
             • <span style="color:var(--gold)">Correction for Attenuation</span>: target your monster; sets ATK to r_true × 10,000 for one turn.
@@ -1189,7 +1190,7 @@ const LOCAL_SPELL_CARDS = {
     sample_size: { id: 'sample_size', type: 'resource', icon: 'N+100', name: 'Sample Size', desc: 'Increase target friendly monster sample size (N), boosting power.' },
     job_relevance: { id: 'job_relevance', type: 'spell', icon: '📌', name: 'Job Relevance', desc: 'Equip to your monster. Monsters with ★★★☆☆ or less need this to attack.' },
     imputation: { id: 'imputation', type: 'spell', icon: '🩹', name: 'Imputation', desc: 'Equip to your monster. If Missing Data targets it, Imputation is destroyed instead.' },
-    missing_data: { id: 'missing_data', type: 'spell', icon: '∅', name: 'Missing Data', desc: 'Destroy any card on the field.' },
+    missing_data: { id: 'missing_data', type: 'trap', icon: '∅', name: 'Missing Data', desc: 'Destroy any card on the field.' },
     range_restrict: { id: 'range_restrict', type: 'trap', icon: '↔', name: 'Range Restriction', desc: 'Target enemy monster. Halve ATK.' },
     correction: { id: 'correction', type: 'resource', icon: '↺', name: 'Correction for Attenuation', desc: 'Target your monster. Set ATK to r_true × 10,000 for this turn.' },
 
@@ -1198,7 +1199,8 @@ const LOCAL_SPELL_CARDS = {
     item_analysis: { id: 'item_analysis', type: 'spell', icon: '🧩', name: 'Automated Item Generation', desc: 'Target your construct stack. Add one matching item (max 3) to improve reliability.' },
 
     construct_drift: { id: 'construct_drift', type: 'trap', icon: '↘', name: 'Construct Drift', desc: 'Target enemy construct. Remove one stacked item (or destroy stack if only one).' },
-    criterion_contam: { id: 'criterion_contam', type: 'trap', icon: '⚠', name: 'Attrition', desc: 'Target enemy monster. Permanently halve N.' }
+    criterion_contam: { id: 'criterion_contam', type: 'trap', icon: '⚠', name: 'Attrition', desc: 'Target enemy monster. Permanently halve N.' },
+    p_hacking: { id: 'p_hacking', type: 'spell', icon: '🎯', name: 'P-hacking', desc: 'Equip to your monster. Its next attack cannot miss, then it is destroyed at the end of that attack.' }
 };
 
 function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
@@ -1325,7 +1327,7 @@ function buildStartingDeck() {
         cog_ability: 4, conscient: 4, struct_int: 4, work_sample: 4,
         job_perf: 4, turnover: 4, job_sat: 4, ocb: 4,
 
-        sample_size: 5, job_relevance: 4, imputation: 3, missing_data: 3, range_restrict: 4, correction: 3,
+        sample_size: 5, job_relevance: 4, imputation: 3, missing_data: 3, range_restrict: 4, correction: 3, p_hacking: 3,
 
         // New additions
         bootstrapping: 4, item_analysis: 3,
@@ -1394,6 +1396,7 @@ function buildMonster(predStack, outStack) {
         summoningSick: true,
         hasJobRelevance: false,
         hasImputation: false,
+        hasPHacking: false,
         correctionApplied: false,
         rangeRestricted: false,
         isMeta: false
@@ -1429,6 +1432,7 @@ function buildMetaMonster(monsters) {
         summoningSick: true,
         hasJobRelevance: false,
         hasImputation: false,
+        hasPHacking: false,
         correctionApplied: false,
         rangeRestricted: false,
         isMeta: true
@@ -1713,6 +1717,12 @@ function applyLocalMove(pid, move) {
             target.hasImputation = true;
             logLocal(`P${pid} equips Imputation to ${target.name}. Missing Data will remove Imputation first.`, 'spell-log');
         }
+        else if (card.id === 'p_hacking') {
+            if (move.target_type !== 'monster' || targetPlayer !== me) return { success: false, message: 'P-hacking must target your monster' };
+            if (target.hasPHacking) return { success: false, message: 'P-hacking is already equipped to this monster' };
+            target.hasPHacking = true;
+            logLocal(`P${pid} equips P-hacking to ${target.name}. Its next attack cannot miss, but it will be destroyed after attacking.`, 'spell-log');
+        }
         else if (card.id === 'missing_data') {
             if (move.target_type === 'construct') {
                 const destroyed = targetArr[move.target_slot];
@@ -1789,7 +1799,8 @@ function applyLocalMove(pid, move) {
 
         const threshold = clamp(Math.round(attacker.power * 20), 1, 20);
         const roll = randInt(1, 20);
-        const hit = roll <= threshold;
+        const isPHackingAttack = !!attacker.hasPHacking;
+        const hit = isPHackingAttack || roll <= threshold;
         move_result = { roll, threshold, hit, attack_data: { damage: 0, outcome: 'tie' } };
 
         attacker.attacksMade += 1;
@@ -1828,6 +1839,12 @@ function applyLocalMove(pid, move) {
                     if (me.monsters[move.attacker_slot]) consumeAttackSample(me.monsters[move.attacker_slot]);
                 }
             }
+        }
+
+        if (isPHackingAttack && me.monsters[move.attacker_slot]) {
+            const doomedName = me.monsters[move.attacker_slot].name;
+            me.monsters[move.attacker_slot] = null;
+            logLocal(`P${pid}'s ${doomedName} is destroyed by P-hacking after attacking.`, 'battle-log');
         }
         markGameOverIfNeeded();
     }
@@ -1868,7 +1885,7 @@ function enumerateCandidateMoves(state, pid) {
                 moves.push({ type: 'place_card', hand_index, slot });
             }
         } else {
-            if (card.id === 'sample_size' || card.id === 'job_relevance' || card.id === 'imputation' || card.id === 'range_restrict' || card.id === 'correction' || card.id === 'item_analysis' || card.id === 'bootstrapping' || card.id === 'criterion_contam') {
+            if (card.id === 'sample_size' || card.id === 'job_relevance' || card.id === 'imputation' || card.id === 'p_hacking' || card.id === 'range_restrict' || card.id === 'correction' || card.id === 'item_analysis' || card.id === 'bootstrapping' || card.id === 'criterion_contam') {
                 ['me', 'opp'].forEach(target_owner => {
                     const targetMonsters = state.players[target_owner === 'me' ? pid : (pid === 1 ? 2 : 1)].monsters;
                     targetMonsters.forEach((m, target_slot) => {
@@ -2247,6 +2264,9 @@ function renderMonsterSlot(slotIdx, owner) {
     } else if (uiPhase === 'spell_target_imputation' && owner === 'player' && m) {
         slot.classList.add('spell-target');
         slot.onclick = () => executeImputation(slotIdx);
+    } else if (uiPhase === 'spell_target_p_hacking' && owner === 'player' && m) {
+        slot.classList.add('spell-target');
+        slot.onclick = () => executePHacking(slotIdx);
     } else {
         slot.onclick = null;
     }
@@ -2272,6 +2292,7 @@ function renderMonsterSlot(slotIdx, owner) {
     let repHtml = '';
     if (m.hasJobRelevance) repHtml += `<span style="color:var(--spell); font-size:0.6cqmin;">[JR]</span>`;
     if (m.hasImputation) repHtml += ` <span style="color:var(--predictor-light); font-size:0.6cqmin;">[IMP]</span>`;
+    if (m.hasPHacking) repHtml += ` <span style="color:var(--gold); font-size:0.6cqmin;">[PH]</span>`;
     const aiStars = m.adverseStarsText || '★★★★★';
     const relevanceHtml = (m.requiresJobRelevance && !m.hasJobRelevance) ? `<div style="font-size:0.58cqmin; color:#ff5555; text-align:center;">NEEDS JOB RELEVANCE</div>` : '';
 
@@ -2630,6 +2651,8 @@ function selectHandCard(idx) {
             uiPhase = 'spell_target_job_relevance';
         } else if (card.id === 'imputation') {
             uiPhase = 'spell_target_imputation';
+        } else if (card.id === 'p_hacking') {
+            uiPhase = 'spell_target_p_hacking';
         } else if (card.id === 'bootstrapping') {
             uiPhase = 'spell_target_bootstrapping';
         } else if (card.id === 'item_analysis') {
@@ -2746,6 +2769,13 @@ async function executeImputation(slotIdx) {
     selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
 }
 
+async function executePHacking(slotIdx) {
+    if (uiPhase !== 'spell_target_p_hacking') return;
+    await submitMove({ type: 'play_spell', hand_index: selectedHandCard, target_owner: 'me', target_type: 'monster', target_slot: slotIdx });
+    triggerFlash('heal');
+    selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
+}
+
 async function executeBootstrapping(slotIdx) {
     if (uiPhase !== 'spell_target_bootstrapping') return;
     await submitMove({ type: 'play_spell', hand_index: selectedHandCard, target_owner: 'me', target_type: 'monster', target_slot: slotIdx });
@@ -2780,6 +2810,7 @@ function onMonsterSlotClick(slotIdx) {
     if (uiPhase === 'spell_target_sample_size') executeSampleSize(slotIdx);
     if (uiPhase === 'spell_target_job_relevance') executeJobRelevance(slotIdx);
     if (uiPhase === 'spell_target_imputation') executeImputation(slotIdx);
+    if (uiPhase === 'spell_target_p_hacking') executePHacking(slotIdx);
     if (uiPhase === 'spell_target_bootstrapping') executeBootstrapping(slotIdx);
 }
 
