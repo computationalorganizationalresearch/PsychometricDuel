@@ -183,9 +183,12 @@ function refreshMonsterStats(&$m) {
     $m['rObs'] = (($m['rTrue'] ?? 0) * sqrt($predAlpha * $outAlpha)) * $validityMultiplier;
     $m['baseAtk'] = (int) round(abs($m['rObs']) * 10000);
 
+    $correctionBaseAtk = (int) round(abs($m['rTrue'] ?? 0) * $validityMultiplier * 10000);
+    $effectiveAtkBase = !empty($m['correctionApplied']) ? $correctionBaseAtk : $m['baseAtk'];
     $rangeStacks = max(0, (int)($m['rangeRestrictionStacks'] ?? 0));
-    if ($rangeStacks > 0) $m['atk'] = max(100, (int) floor($m['baseAtk'] / (2 ** $rangeStacks)));
-    else $m['atk'] = $m['baseAtk'];
+    $m['atk'] = $rangeStacks > 0
+        ? (int) floor($effectiveAtkBase / (2 ** $rangeStacks))
+        : $effectiveAtkBase;
 
     $m['power'] = approxPowerFromROBSandN(getPowerValidityCoefficient($m), $m['n'] ?? MONSTER_BASE_N);
 }
@@ -586,7 +589,6 @@ function movePlaySpell(&$state, &$me, &$opp, $pNum, $move) {
         $me['monsters'][$targetSlot]['correctionApplied'] = true;
         $me['monsters'][$targetSlot]['rangeRestrictionStacks'] = 0;
         refreshMonsterStats($me['monsters'][$targetSlot]);
-        $me['monsters'][$targetSlot]['atk'] = (int) round(abs($me['monsters'][$targetSlot]['rTrue'] ?? 0) * max(0, (float)($me['monsters'][$targetSlot]['validityMultiplier'] ?? 1.0)) * 10000);
     } elseif ($id === 'bootstrapping') {
         if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Bootstrapping must target your monster'];
         $me['monsters'][$targetSlot]['baseN'] = ($me['monsters'][$targetSlot]['baseN'] ?? MONSTER_BASE_N) + 30;
