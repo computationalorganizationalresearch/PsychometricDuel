@@ -1192,6 +1192,7 @@ const LOCAL_SPELL_CARDS = {
     imputation: { id: 'imputation', type: 'spell', icon: '🩹', name: 'Imputation', desc: 'Equip to your monster. If Missing Data targets it, Imputation is destroyed instead.', equip: { key: 'hasImputation', battleSummary: 'No attack change; will absorb Missing Data if targeted.' } },
     missing_data: { id: 'missing_data', type: 'trap', icon: '∅', name: 'Missing Data', desc: 'Destroy any card on the field.' },
     range_restrict: { id: 'range_restrict', type: 'trap', icon: '↔', name: 'Range Restriction', desc: 'Target enemy monster. Halve ATK.' },
+    item_leakage: { id: 'item_leakage', type: 'trap', icon: '💧', name: 'Item Leakage', desc: 'Target enemy monster. Set validity to 0 (ATK 0) for 1 turn.' },
     correction: { id: 'correction', type: 'resource', icon: '↺', name: 'Correction for Attenuation', desc: 'Target your monster. Set ATK to r_true × 10,000 for this turn.' },
 
     // New psychometrically relevant support / disruption cards
@@ -1347,10 +1348,11 @@ function refreshMonsterStats(m) {
         return;
     }
     const validityMultiplier = Math.max(0, m.validityMultiplier ?? 1);
-    m.rObs = (m.rTrue * Math.sqrt(Math.max(0.05, m.predAlpha) * Math.max(0.05, m.outAlpha))) * validityMultiplier;
+    const effectiveValidityMultiplier = m.itemLeakageApplied ? 0 : validityMultiplier;
+    m.rObs = (m.rTrue * Math.sqrt(Math.max(0.05, m.predAlpha) * Math.max(0.05, m.outAlpha))) * effectiveValidityMultiplier;
     m.baseAtk = Math.round(Math.abs(m.rObs) * 10000);
 
-    const correctionBaseAtk = Math.round(Math.abs(m.rTrue ?? 0) * validityMultiplier * 10000);
+    const correctionBaseAtk = Math.round(Math.abs(m.rTrue ?? 0) * effectiveValidityMultiplier * 10000);
     const effectiveAtkBase = m.correctionApplied ? correctionBaseAtk : m.baseAtk;
     const rangeStacks = Math.max(0, m.rangeRestrictionStacks ?? 0);
     let nextAtk = effectiveAtkBase;
@@ -1387,7 +1389,7 @@ function buildStartingDeck() {
         cog_ability: 4, conscient: 4, struct_int: 4, work_sample: 4,
         job_perf: 4, turnover: 4, job_sat: 4, ocb: 4,
 
-        sample_size: 5, job_relevance: 4, imputation: 3, missing_data: 3, range_restrict: 4, correction: 3, p_hacking: 3, practice_effect: 3,
+        sample_size: 5, job_relevance: 4, imputation: 3, missing_data: 3, range_restrict: 4, item_leakage: 3, correction: 3, p_hacking: 3, practice_effect: 3,
 
         // New additions
         bootstrapping: 4, item_analysis: 3,
@@ -1458,6 +1460,7 @@ function buildMonster(predStack, outStack) {
         hasImputation: false,
         hasPHacking: false,
         hasPracticeEffect: false,
+        itemLeakageApplied: false,
         correctionApplied: false,
         rangeRestrictionStacks: 0,
         validityMultiplier: 1,
@@ -1496,6 +1499,7 @@ function buildMetaMonster(monsters) {
         hasImputation: false,
         hasPHacking: false,
         hasPracticeEffect: false,
+        itemLeakageApplied: false,
         correctionApplied: false,
         rangeRestrictionStacks: 0,
         validityMultiplier: 1,
@@ -1548,8 +1552,13 @@ function startTurnFor(pid) {
 function clearEndOfTurnEffects(pid) {
     const p = localGame.players[pid];
     p.monsters.forEach(m => {
-        if (!m || !m.correctionApplied) return;
-        m.correctionApplied = false;
+        if (!m) return;
+        if (m.correctionApplied) {
+            m.correctionApplied = false;
+        }
+        if (m.itemLeakageApplied) {
+            m.itemLeakageApplied = false;
+        }
         refreshMonsterStats(m);
     });
 }
@@ -1562,7 +1571,7 @@ function chooseAIMulliganIndices(hand) {
 
     // Toss situational/reactive cards in opening hand more often
     hand.forEach((c, i) => {
-        if (!c.isItem && ['missing_data', 'range_restrict', 'construct_drift', 'criterion_contam', 'correction'].includes(c.id)) {
+        if (!c.isItem && ['missing_data', 'range_restrict', 'item_leakage', 'construct_drift', 'criterion_contam', 'correction'].includes(c.id)) {
             mark(i);
         }
     });
@@ -1845,6 +1854,12 @@ function applyLocalMove(pid, move) {
             refreshMonsterStats(target);
             logLocal(`P${pid} applies Range Restriction to ${target.name}. (${target.rangeRestrictionStacks} stack${target.rangeRestrictionStacks === 1 ? '' : 's'}) ATK reduced to ${target.atk}.`, 'spell-log');
         }
+        else if (card.id === 'item_leakage') {
+            if (move.target_type !== 'monster' || targetPlayer !== opp) return { success: false, message: 'Item Leakage must target an enemy monster' };
+            target.itemLeakageApplied = true;
+            refreshMonsterStats(target);
+            logLocal(`P${pid} applies Item Leakage to ${target.name}. Validity suppressed to zero this turn (ATK ${target.atk}).`, 'spell-log');
+        }
         else if (card.id === 'correction') {
             if (move.target_type !== 'monster' || targetPlayer !== me) return { success: false, message: 'Correction for Attenuation must target your monster' };
             target.correctionApplied = true;
@@ -2005,7 +2020,7 @@ function enumerateCandidateMoves(state, pid) {
                 moves.push({ type: 'place_card', hand_index, slot });
             }
         } else {
-            if (card.id === 'sample_size' || card.id === 'job_relevance' || card.id === 'imputation' || card.id === 'p_hacking' || card.id === 'practice_effect' || card.id === 'range_restrict' || card.id === 'correction' || card.id === 'item_analysis' || card.id === 'bootstrapping' || card.id === 'criterion_contam') {
+            if (card.id === 'sample_size' || card.id === 'job_relevance' || card.id === 'imputation' || card.id === 'p_hacking' || card.id === 'practice_effect' || card.id === 'range_restrict' || card.id === 'item_leakage' || card.id === 'correction' || card.id === 'item_analysis' || card.id === 'bootstrapping' || card.id === 'criterion_contam') {
                 ['me', 'opp'].forEach(target_owner => {
                     const targetMonsters = state.players[target_owner === 'me' ? pid : (pid === 1 ? 2 : 1)].monsters;
                     targetMonsters.forEach((m, target_slot) => {
@@ -2369,6 +2384,9 @@ function renderMonsterSlot(slotIdx, owner) {
     } else if (uiPhase === 'spell_target_criterion_contam' && owner === 'opp' && m) {
         slot.classList.add('spell-target');
         slot.onclick = () => executeCriterionContam(slotIdx);
+    } else if (uiPhase === 'spell_target_item_leakage' && owner === 'opp' && m) {
+        slot.classList.add('spell-target');
+        slot.onclick = () => executeItemLeakage(slotIdx);
     } else if (uiPhase === 'spell_target_correct' && owner === 'player' && m && !m.isMeta) {
         slot.classList.add('spell-target');
         slot.onclick = () => executeCorrection(slotIdx);
@@ -2417,6 +2435,7 @@ function renderMonsterSlot(slotIdx, owner) {
     if (m.hasImputation) repHtml += ` <span style="color:var(--predictor-light); font-size:0.6cqmin;">[IMP]</span>`;
     if (m.hasPHacking) repHtml += ` <span style="color:var(--gold); font-size:0.6cqmin;">[PH]</span>`;
     if (m.hasPracticeEffect) repHtml += ` <span style="color:#cc66ff; font-size:0.6cqmin;">[PE]</span>`;
+    if (m.itemLeakageApplied) repHtml += ` <span style="color:#66ccff; font-size:0.6cqmin;">[IL]</span>`;
     const aiStars = m.adverseStarsText || '★★★★★';
     const relevanceHtml = (m.requiresJobRelevance && !m.hasJobRelevance) ? `<div style="font-size:0.58cqmin; color:#ff5555; text-align:center;">NEEDS JOB RELEVANCE</div>` : '';
 
@@ -2767,6 +2786,8 @@ function selectHandCard(idx) {
             uiPhase = 'spell_target_missing_data';
         } else if (card.id === 'range_restrict') {
             uiPhase = 'spell_target_range';
+        } else if (card.id === 'item_leakage') {
+            uiPhase = 'spell_target_item_leakage';
         } else if (card.id === 'correction') {
             uiPhase = 'spell_target_correct';
         } else if (card.id === 'sample_size') {
@@ -2862,6 +2883,13 @@ async function executeMissingData(slotIdx, owner, targetType) {
 
 async function executeRangeRestrict(slotIdx) {
     if (uiPhase !== 'spell_target_range') return;
+    await submitMove({ type: 'play_spell', hand_index: selectedHandCard, target_owner: 'opp', target_type: 'monster', target_slot: slotIdx });
+    triggerFlash('heal');
+    selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
+}
+
+async function executeItemLeakage(slotIdx) {
+    if (uiPhase !== 'spell_target_item_leakage') return;
     await submitMove({ type: 'play_spell', hand_index: selectedHandCard, target_owner: 'opp', target_type: 'monster', target_slot: slotIdx });
     triggerFlash('heal');
     selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
