@@ -778,6 +778,9 @@ function moveMeta(&$state, &$me, $pNum) {
 function resetMonstersForTurn(&$player) {
     foreach ($player['monsters'] as &$m) {
         if (!$m) continue;
+        if (!empty($m['correctionApplied'])) {
+            $m['correctionApplied'] = false;
+        }
         $m['summoningSick'] = false;
         $m['attacksMade'] = 0;
         $m['maxAttacks'] = !empty($m['isMeta']) ? 2 : 1;

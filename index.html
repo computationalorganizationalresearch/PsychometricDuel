@@ -1545,6 +1545,15 @@ function startTurnFor(pid) {
     maybeDeckOutDamage(p, pid);
 }
 
+function clearEndOfTurnEffects(pid) {
+    const p = localGame.players[pid];
+    p.monsters.forEach(m => {
+        if (!m || !m.correctionApplied) return;
+        m.correctionApplied = false;
+        refreshMonsterStats(m);
+    });
+}
+
 function chooseAIMulliganIndices(hand) {
     const replace = [];
     const replaceSet = new Set();
@@ -1958,6 +1967,7 @@ function applyLocalMove(pid, move) {
         logLocal(`P${pid} performs META-ANALYSIS and summons ${meta.name}! (ATK ${meta.atk}, PWR ${Math.floor(meta.power * 100)}%)`, 'meta-log');
     }
     else if (move.type === 'end_turn') {
+        clearEndOfTurnEffects(pid);
         const nextPid = pid === 1 ? 2 : 1;
         localGame.currentPlayer = nextPid;
         startTurnFor(nextPid);
