@@ -164,7 +164,9 @@ function approxPowerFromROBSandN($rObs, $n) {
 
 function getPowerValidityCoefficient($m) {
     if (!$m) return 0;
-    return !empty($m['correctionApplied']) ? abs($m['rTrue'] ?? 0) : abs($m['rObs'] ?? 0);
+    $validityMultiplier = max(0, (float)($m['validityMultiplier'] ?? 1.0));
+    $coeff = !empty($m['correctionApplied']) ? abs($m['rTrue'] ?? 0) : abs($m['rObs'] ?? 0);
+    return $coeff * $validityMultiplier;
 }
 
 function refreshMonsterStats(&$m) {
@@ -177,10 +179,12 @@ function refreshMonsterStats(&$m) {
 
     $predAlpha = max(0.05, $m['predAlpha'] ?? 0.05);
     $outAlpha = max(0.05, $m['outAlpha'] ?? 0.05);
-    $m['rObs'] = ($m['rTrue'] ?? 0) * sqrt($predAlpha * $outAlpha);
+    $validityMultiplier = max(0, (float)($m['validityMultiplier'] ?? 1.0));
+    $m['rObs'] = (($m['rTrue'] ?? 0) * sqrt($predAlpha * $outAlpha)) * $validityMultiplier;
     $m['baseAtk'] = (int) round(abs($m['rObs']) * 10000);
 
-    if (!empty($m['rangeRestricted'])) $m['atk'] = max(100, (int) floor($m['baseAtk'] / 2));
+    $rangeStacks = max(0, (int)($m['rangeRestrictionStacks'] ?? 0));
+    if ($rangeStacks > 0) $m['atk'] = max(100, (int) floor($m['baseAtk'] / (2 ** $rangeStacks)));
     else $m['atk'] = $m['baseAtk'];
 
     $m['power'] = approxPowerFromROBSandN(getPowerValidityCoefficient($m), $m['n'] ?? MONSTER_BASE_N);
@@ -188,6 +192,9 @@ function refreshMonsterStats(&$m) {
 
 function consumeAttackSample(&$monster) {
     if (!$monster) return;
+    if (!empty($monster['hasPracticeEffect'])) {
+        $monster['validityMultiplier'] = max(0.03125, ($monster['validityMultiplier'] ?? 1.0) / 2);
+    }
     $monster['n'] = !empty($monster['isMeta']) ? META_BASE_N : ($monster['baseN'] ?? MONSTER_BASE_N);
     refreshMonsterStats($monster);
 }
@@ -214,7 +221,7 @@ function buildDeck() {
     $counts = [
         'cog_ability'=>4,'conscient'=>4,'struct_int'=>4,'work_sample'=>4,
         'job_perf'=>4,'turnover'=>4,'job_sat'=>4,'ocb'=>4,
-        'sample_size'=>5,'job_relevance'=>4,'imputation'=>3,'missing_data'=>3,'range_restrict'=>4,'correction'=>3,'p_hacking'=>3,
+        'sample_size'=>5,'job_relevance'=>4,'imputation'=>3,'missing_data'=>3,'range_restrict'=>4,'correction'=>3,'p_hacking'=>3,'practice_effect'=>3,
         'bootstrapping'=>4,'item_analysis'=>3,
         'construct_drift'=>3,'criterion_contam'=>3,
     ];
@@ -227,6 +234,7 @@ function buildDeck() {
         'range_restrict'=>['trap','Range Restriction','↔','Target enemy monster. Halve ATK.'],
         'correction'=>['resource','Correction for Attenuation','↺','Target your monster. Set ATK to r_true × 10,000 for this turn.'],
         'p_hacking'=>['spell','P-hacking','🎯','Equip to your monster. Its next attack cannot miss, then it is destroyed at the end of that attack.'],
+        'practice_effect'=>['trap','Practice Effect','🌀','Equip to a monster. After it attacks, halve its current validity coefficient.'],
         'bootstrapping'=>['spell','Bootstrapping','🧮','Target your monster. Permanently increase its base N by 30.'],
         'item_analysis'=>['spell','Automated Item Generation','🧩','Target your construct stack. Add one matching item (max 3) to improve reliability.'],
         'construct_drift'=>['trap','Construct Drift','↘','Target enemy construct. Remove one stacked item (or destroy stack if only one).'],
@@ -496,8 +504,10 @@ function moveSummon(&$state, &$me, $pNum, $move) {
         'hasJobRelevance' => false,
         'hasImputation' => false,
         'hasPHacking' => false,
+        'hasPracticeEffect' => false,
         'correctionApplied' => false,
-        'rangeRestricted' => false,
+        'rangeRestrictionStacks' => 0,
+        'validityMultiplier' => 1.0,
         'isMeta' => false
     ];
     refreshMonsterStats($monster);
@@ -545,6 +555,15 @@ function movePlaySpell(&$state, &$me, &$opp, $pNum, $move) {
         if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'P-hacking must target your monster'];
         if (!empty($me['monsters'][$targetSlot]['hasPHacking'])) return ['ok'=>false,'msg'=>'P-hacking is already equipped to this monster'];
         $me['monsters'][$targetSlot]['hasPHacking'] = true;
+    } elseif ($id === 'practice_effect') {
+        if ($targetType !== 'monster') return ['ok'=>false,'msg'=>'Practice Effect must target a monster'];
+        if ($targetOwner === 'me') {
+            if (!empty($me['monsters'][$targetSlot]['hasPracticeEffect'])) return ['ok'=>false,'msg'=>'Practice Effect is already equipped to this monster'];
+            $me['monsters'][$targetSlot]['hasPracticeEffect'] = true;
+        } else {
+            if (!empty($opp['monsters'][$targetSlot]['hasPracticeEffect'])) return ['ok'=>false,'msg'=>'Practice Effect is already equipped to this monster'];
+            $opp['monsters'][$targetSlot]['hasPracticeEffect'] = true;
+        }
     } elseif ($id === 'missing_data') {
         if ($targetType === 'construct') {
             if ($targetOwner === 'me') $me['constructs'][$targetSlot] = null;
@@ -560,14 +579,14 @@ function movePlaySpell(&$state, &$me, &$opp, $pNum, $move) {
         }
     } elseif ($id === 'range_restrict') {
         if ($targetType !== 'monster' || $targetOwner !== 'opp') return ['ok'=>false,'msg'=>'Range Restriction must target enemy monster'];
-        $opp['monsters'][$targetSlot]['rangeRestricted'] = true;
+        $opp['monsters'][$targetSlot]['rangeRestrictionStacks'] = max(0, (int)($opp['monsters'][$targetSlot]['rangeRestrictionStacks'] ?? 0)) + 1;
         refreshMonsterStats($opp['monsters'][$targetSlot]);
     } elseif ($id === 'correction') {
         if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Correction for Attenuation must target your monster'];
         $me['monsters'][$targetSlot]['correctionApplied'] = true;
-        $me['monsters'][$targetSlot]['rangeRestricted'] = false;
+        $me['monsters'][$targetSlot]['rangeRestrictionStacks'] = 0;
         refreshMonsterStats($me['monsters'][$targetSlot]);
-        $me['monsters'][$targetSlot]['atk'] = (int) round(abs($me['monsters'][$targetSlot]['rTrue'] ?? 0) * 10000);
+        $me['monsters'][$targetSlot]['atk'] = (int) round(abs($me['monsters'][$targetSlot]['rTrue'] ?? 0) * max(0, (float)($me['monsters'][$targetSlot]['validityMultiplier'] ?? 1.0)) * 10000);
     } elseif ($id === 'bootstrapping') {
         if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Bootstrapping must target your monster'];
         $me['monsters'][$targetSlot]['baseN'] = ($me['monsters'][$targetSlot]['baseN'] ?? MONSTER_BASE_N) + 30;
@@ -700,8 +719,10 @@ function moveMeta(&$state, &$me, $pNum) {
         'hasJobRelevance' => false,
         'hasImputation' => false,
         'hasPHacking' => false,
+        'hasPracticeEffect' => false,
         'correctionApplied' => false,
-        'rangeRestricted' => false,
+        'rangeRestrictionStacks' => 0,
+        'validityMultiplier' => 1.0,
         'isMeta' => true
     ];
     refreshMonsterStats($meta);
