@@ -214,7 +214,7 @@ function buildDeck() {
     $counts = [
         'cog_ability'=>4,'conscient'=>4,'struct_int'=>4,'work_sample'=>4,
         'job_perf'=>4,'turnover'=>4,'job_sat'=>4,'ocb'=>4,
-        'sample_size'=>5,'job_relevance'=>4,'imputation'=>3,'missing_data'=>3,'range_restrict'=>4,'correction'=>3,
+        'sample_size'=>5,'job_relevance'=>4,'imputation'=>3,'missing_data'=>3,'range_restrict'=>4,'correction'=>3,'p_hacking'=>3,
         'bootstrapping'=>4,'item_analysis'=>3,
         'construct_drift'=>3,'criterion_contam'=>3,
     ];
@@ -223,9 +223,10 @@ function buildDeck() {
         'sample_size'=>['resource','Sample Size','N+100','Increase target friendly monster sample size (N), boosting power.'],
         'job_relevance'=>['spell','Job Relevance','📌','Equip to your monster. Monsters with ★★★☆☆ or less need this to attack.'],
         'imputation'=>['spell','Imputation','🩹','Equip to your monster. If Missing Data targets it, Imputation is destroyed instead.'],
-        'missing_data'=>['spell','Missing Data','∅','Destroy any card on the field.'],
+        'missing_data'=>['trap','Missing Data','∅','Destroy any card on the field.'],
         'range_restrict'=>['trap','Range Restriction','↔','Target enemy monster. Halve ATK.'],
         'correction'=>['resource','Correction for Attenuation','↺','Target your monster. Set ATK to r_true × 10,000 for this turn.'],
+        'p_hacking'=>['spell','P-hacking','🎯','Equip to your monster. Its next attack cannot miss, then it is destroyed at the end of that attack.'],
         'bootstrapping'=>['spell','Bootstrapping','🧮','Target your monster. Permanently increase its base N by 30.'],
         'item_analysis'=>['spell','Automated Item Generation','🧩','Target your construct stack. Add one matching item (max 3) to improve reliability.'],
         'construct_drift'=>['trap','Construct Drift','↘','Target enemy construct. Remove one stacked item (or destroy stack if only one).'],
@@ -494,6 +495,7 @@ function moveSummon(&$state, &$me, $pNum, $move) {
         'summoningSick' => true,
         'hasJobRelevance' => false,
         'hasImputation' => false,
+        'hasPHacking' => false,
         'correctionApplied' => false,
         'rangeRestricted' => false,
         'isMeta' => false
@@ -539,6 +541,10 @@ function movePlaySpell(&$state, &$me, &$opp, $pNum, $move) {
         if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Imputation must target your monster'];
         if (!empty($me['monsters'][$targetSlot]['hasImputation'])) return ['ok'=>false,'msg'=>'Imputation is already equipped to this monster'];
         $me['monsters'][$targetSlot]['hasImputation'] = true;
+    } elseif ($id === 'p_hacking') {
+        if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'P-hacking must target your monster'];
+        if (!empty($me['monsters'][$targetSlot]['hasPHacking'])) return ['ok'=>false,'msg'=>'P-hacking is already equipped to this monster'];
+        $me['monsters'][$targetSlot]['hasPHacking'] = true;
     } elseif ($id === 'missing_data') {
         if ($targetType === 'construct') {
             if ($targetOwner === 'me') $me['constructs'][$targetSlot] = null;
@@ -600,7 +606,8 @@ function moveAttack(&$state, &$me, &$opp, $pNum, $move) {
 
     $threshold = clamp((int) round(($attacker['power'] ?? 0.05) * 20), 1, 20);
     $roll = random_int(1, 20);
-    $hit = $roll <= $threshold;
+    $isPHackingAttack = !empty($attacker['hasPHacking']);
+    $hit = $isPHackingAttack || $roll <= $threshold;
 
     $result = ['ok'=>true,'roll'=>$roll,'threshold'=>$threshold,'hit'=>$hit,'attack_data'=>['damage'=>0,'outcome'=>'tie']];
 
@@ -648,6 +655,12 @@ function moveAttack(&$state, &$me, &$opp, $pNum, $move) {
         $state['log'][] = ['msg' => "{$attacker['name']} and {$defender['name']} destroy each other.", 'type' => 'battle-log'];
     }
 
+    if ($isPHackingAttack && !empty($me['monsters'][$atkSlot])) {
+        $attackerName = $me['monsters'][$atkSlot]['name'];
+        $me['monsters'][$atkSlot] = null;
+        $state['log'][] = ['msg' => "P{$pNum}'s {$attackerName} is destroyed by P-hacking after attacking.", 'type' => 'battle-log'];
+    }
+
     $result['msg'] = 'Attack resolved';
     return $result;
 }
@@ -686,6 +699,7 @@ function moveMeta(&$state, &$me, $pNum) {
         'summoningSick' => true,
         'hasJobRelevance' => false,
         'hasImputation' => false,
+        'hasPHacking' => false,
         'correctionApplied' => false,
         'rangeRestricted' => false,
         'isMeta' => true
