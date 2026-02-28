@@ -13,8 +13,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 $DATA_DIR = __DIR__ . '/rooms/';
 if (!is_dir($DATA_DIR)) mkdir($DATA_DIR, 0777, true);
 
-const MAX_HAND_SIZE = 10;
-const STARTING_HAND_SIZE = 10;
+const MAX_HAND_SIZE = 12;
+const STARTING_HAND_SIZE = 12;
 const MONSTER_BASE_N = 50;
 const META_BASE_N = 50;
 
