@@ -785,7 +785,18 @@ function resetMonstersForTurn(&$player) {
     }
 }
 
+function clearEndOfTurnEffects(&$player) {
+    foreach ($player['monsters'] as &$m) {
+        if (!$m) continue;
+        if (empty($m['correctionApplied'])) continue;
+        $m['correctionApplied'] = false;
+        refreshMonsterStats($m);
+    }
+}
+
 function moveEndTurn(&$state, &$me, &$opp, $pNum) {
+    clearEndOfTurnEffects($me);
+
     $state['current_turn'] = $pNum === 1 ? 2 : 1;
     $state['turn_number']++;
 
