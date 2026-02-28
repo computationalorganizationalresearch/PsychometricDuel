@@ -731,12 +731,11 @@ function moveMeta(&$state, &$me, $pNum) {
 
     $m = $me['monsters'];
     $meanR = (abs($m[0]['rObs']) + abs($m[1]['rObs']) + abs($m[2]['rObs'])) / 3;
-    $meanAtk = (($m[0]['atk'] ?? 0) + ($m[1]['atk'] ?? 0) + ($m[2]['atk'] ?? 0)) / 3;
-
     $constructs = getConstructs();
     $id = $target['id'];
     $short = $constructs[$id]['short'] ?? 'META';
 
+    $metaRTrue = clamp($meanR * 1.35, 0.35, 0.95);
     $meta = [
         'name' => "Meta-{$short} Titan",
         'sprite' => '🌌',
@@ -744,19 +743,19 @@ function moveMeta(&$state, &$me, $pNum) {
         'outId' => $target['type'] === 'out' ? $id : 'META',
         'predAlpha' => 0.99,
         'outAlpha' => 0.99,
-        'rTrue' => clamp($meanR * 1.35, 0.35, 0.95),
+        'rTrue' => $metaRTrue,
         'adverseImpact' => 0,
         'adverseStars' => 5,
         'adverseStarsText' => '★★★★★',
         'requiresJobRelevance' => false,
-        'rObs' => clamp($meanR * 1.25, 0.35, 0.9),
-        'baseAtk' => clamp((int) round($meanAtk * 1.45), 2400, 5200),
+        'rObs' => $metaRTrue,
+        'baseAtk' => (int) round(abs($metaRTrue) * 10000),
         'atk' => 0,
         'n' => META_BASE_N,
         'power' => 0.97,
         'attacksMade' => 0,
         'maxAttacks' => 2,
-        'summoningSick' => true,
+        'summoningSick' => false,
         'hasJobRelevance' => false,
         'hasImputation' => false,
         'hasPHacking' => false,

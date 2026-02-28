@@ -1469,7 +1469,7 @@ function buildMonster(predStack, outStack) {
 }
 function buildMetaMonster(monsters) {
     const meanR = monsters.reduce((s, m) => s + Math.abs(m.rObs || 0), 0) / monsters.length;
-    const meanAtk = monsters.reduce((s, m) => s + (m.atk || 0), 0) / monsters.length;
+    const metaRTrue = clamp(meanR * 1.35, 0.35, 0.95);
 
     return {
         name: getMetaTitanName(monsters),
@@ -1478,20 +1478,20 @@ function buildMetaMonster(monsters) {
         outId: 'META',
         predAlpha: 0.99,
         outAlpha: 0.99,
-        rTrue: clamp(meanR * 1.35, 0.35, 0.95),
+        rTrue: metaRTrue,
         adverseImpact: 0,
         adverseStars: 5,
         adverseStarsText: '★★★★★',
         requiresJobRelevance: false,
-        rObs: clamp(meanR * 1.25, 0.35, 0.9),
-        baseAtk: clamp(Math.round(meanAtk * 1.45), 2400, 5200),
+        rObs: metaRTrue,
+        baseAtk: Math.round(Math.abs(metaRTrue) * 10000),
         atk: 0,
         baseN: 50,
         n: 50,
         power: 0.97,
         attacksMade: 0,
         maxAttacks: 2,
-        summoningSick: true,
+        summoningSick: false,
         hasJobRelevance: false,
         hasImputation: false,
         hasPHacking: false,
@@ -1503,6 +1503,8 @@ function buildMetaMonster(monsters) {
     };
 }
 function finalizeMetaMonster(m) {
+    m.rObs = m.rTrue;
+    m.baseAtk = Math.round(Math.abs(m.rTrue) * 10000);
     m.atk = m.baseAtk;
     m.power = clamp(0.9 + (m.n / 1000), 0.9, 0.99);
     return m;
