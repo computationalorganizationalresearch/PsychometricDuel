@@ -1300,7 +1300,12 @@ function refreshMonsterStats(m) {
     const validityMultiplier = Math.max(0, m.validityMultiplier ?? 1);
     m.rObs = (m.rTrue * Math.sqrt(Math.max(0.05, m.predAlpha) * Math.max(0.05, m.outAlpha))) * validityMultiplier;
     m.baseAtk = Math.round(Math.abs(m.rObs) * 10000);
+
+    const correctionBaseAtk = Math.round(Math.abs(m.rTrue ?? 0) * validityMultiplier * 10000);
+    const effectiveAtkBase = m.correctionApplied ? correctionBaseAtk : m.baseAtk;
     const rangeStacks = Math.max(0, m.rangeRestrictionStacks ?? 0);
+    m.atk = rangeStacks > 0 ? Math.floor(effectiveAtkBase / (2 ** rangeStacks)) : effectiveAtkBase;
+
     if (rangeStacks > 0) m.atk = Math.floor(m.baseAtk / (2 ** rangeStacks));
     else m.atk = m.baseAtk;
     m.power = approxPowerFromROBSandN(getPowerValidityCoefficient(m), m.n);
@@ -1766,7 +1771,6 @@ function applyLocalMove(pid, move) {
             target.correctionApplied = true;
             target.rangeRestrictionStacks = 0;
             refreshMonsterStats(target);
-            target.atk = Math.round(Math.abs(target.rTrue ?? 0) * Math.max(0, target.validityMultiplier ?? 1) * 10000);
             logLocal(`P${pid} applies Correction for Attenuation to ${target.name}. ATK ${target.atk}, PWR ${Math.floor(target.power * 100)}%.`, 'spell-log');
         }
         else if (card.id === 'bootstrapping') {
