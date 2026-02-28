@@ -126,12 +126,8 @@ function adverseImpactStarsFromBwd($rawBwd) {
     return 1;
 }
 
-function waitTurnsFromStars($stars) {
-    if ($stars >= 4) return 0;
-    if ($stars === 3) return 1;
-    if ($stars === 2) return 2;
-    if ($stars === 1) return 0;
-    return 0;
+function requiresJobRelevanceFromStars($stars) {
+    return $stars <= 3;
 }
 
 function getPairAdverseImpact($predId, $outId) {
@@ -141,7 +137,7 @@ function getPairAdverseImpact($predId, $outId) {
     return [
         'bwd' => $bwd,
         'stars' => $stars,
-        'waitTurns' => waitTurnsFromStars($stars),
+        'requiresJobRelevance' => requiresJobRelevanceFromStars($stars),
         'starsText' => str_repeat('★', $stars) . str_repeat('☆', max(0, 5 - $stars))
     ];
 }
@@ -187,11 +183,7 @@ function refreshMonsterStats(&$m) {
 
 function consumeAttackSample(&$monster) {
     if (!$monster) return;
-    if (!empty($monster['hasReplication'])) {
-        $monster['hasReplication'] = false;
-    } else {
-        $monster['n'] = !empty($monster['isMeta']) ? META_BASE_N : ($monster['baseN'] ?? MONSTER_BASE_N);
-    }
+    $monster['n'] = !empty($monster['isMeta']) ? META_BASE_N : ($monster['baseN'] ?? MONSTER_BASE_N);
     refreshMonsterStats($monster);
 }
 
@@ -217,14 +209,14 @@ function buildDeck() {
     $counts = [
         'cog_ability'=>4,'conscient'=>4,'struct_int'=>4,'work_sample'=>4,
         'job_perf'=>4,'turnover'=>4,'job_sat'=>4,'ocb'=>4,
-        'sample_size'=>5,'replication'=>3,'missing_data'=>3,'range_restrict'=>4,'correction'=>3,
+        'sample_size'=>5,'job_relevance'=>3,'missing_data'=>3,'range_restrict'=>4,'correction'=>3,
         'bootstrapping'=>4,'item_analysis'=>3,
         'construct_drift'=>3,'criterion_contam'=>3,
     ];
 
     $spellDefs = [
         'sample_size'=>['resource','Sample Size','N+100','Increase target friendly monster sample size (N), boosting power.'],
-        'replication'=>['spell','Replication','⟳','Target your monster. Grants an extra attack and preserves N for one attack.'],
+        'job_relevance'=>['spell','Job Relevance','📌','Equip to your monster. Monsters with ★★★☆☆ or less need this to attack.'],
         'missing_data'=>['spell','Missing Data','∅','Destroy any card on the field.'],
         'range_restrict'=>['trap','Range Restriction','↔','Target enemy monster. Halve ATK.'],
         'correction'=>['resource','Correction for Attenuation','↺','Target your monster. Set ATK to r_true × 10,000 for this turn.'],
@@ -484,8 +476,7 @@ function moveSummon(&$state, &$me, $pNum, $move) {
         'adverseImpact' => $ai['bwd'],
         'adverseStars' => $ai['stars'],
         'adverseStarsText' => $ai['starsText'],
-        'adverseWaitTurns' => $ai['waitTurns'],
-        'waitTurnsRemaining' => 0,
+        'requiresJobRelevance' => $ai['requiresJobRelevance'],
         'rObs' => 0,
         'baseAtk' => 0,
         'atk' => 0,
@@ -495,7 +486,7 @@ function moveSummon(&$state, &$me, $pNum, $move) {
         'attacksMade' => 0,
         'maxAttacks' => 1,
         'summoningSick' => true,
-        'hasReplication' => false,
+        'hasJobRelevance' => false,
         'rangeRestricted' => false,
         'isMeta' => false
     ];
@@ -531,10 +522,11 @@ function movePlaySpell(&$state, &$me, &$opp, $pNum, $move) {
         if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Sample Size must target your monster'];
         $me['monsters'][$targetSlot]['n'] = clamp(($me['monsters'][$targetSlot]['n'] ?? MONSTER_BASE_N) + 100, MONSTER_BASE_N, 420);
         refreshMonsterStats($me['monsters'][$targetSlot]);
-    } elseif ($id === 'replication') {
-        if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Replication must target your monster'];
-        $me['monsters'][$targetSlot]['hasReplication'] = true;
-        $me['monsters'][$targetSlot]['maxAttacks'] = max($me['monsters'][$targetSlot]['maxAttacks'], 2);
+    } elseif ($id === 'job_relevance') {
+        if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Job Relevance must target your monster'];
+        if (empty($me['monsters'][$targetSlot]['requiresJobRelevance'])) return ['ok'=>false,'msg'=>'This monster does not need Job Relevance to attack'];
+        if (!empty($me['monsters'][$targetSlot]['hasJobRelevance'])) return ['ok'=>false,'msg'=>'Job Relevance is already equipped to this monster'];
+        $me['monsters'][$targetSlot]['hasJobRelevance'] = true;
     } elseif ($id === 'missing_data') {
         if ($targetType === 'construct') {
             if ($targetOwner === 'me') $me['constructs'][$targetSlot] = null;
@@ -584,7 +576,7 @@ function moveAttack(&$state, &$me, &$opp, $pNum, $move) {
     $attacker = &$me['monsters'][$atkSlot];
     if (!$attacker) return ['ok'=>false,'msg'=>'No attacker in that slot'];
     if (!empty($attacker['summoningSick'])) return ['ok'=>false,'msg'=>'This monster cannot attack the turn it was summoned'];
-    if (($attacker['waitTurnsRemaining'] ?? 0) > 0) return ['ok'=>false,'msg'=>'This monster is waiting ' . $attacker['waitTurnsRemaining'] . ' more turn(s)'];
+    if (!empty($attacker['requiresJobRelevance']) && empty($attacker['hasJobRelevance'])) return ['ok'=>false,'msg'=>'This monster needs Job Relevance equipped to attack'];
     if (($attacker['attacksMade'] ?? 0) >= ($attacker['maxAttacks'] ?? 1)) return ['ok'=>false,'msg'=>'This monster has no attacks left'];
 
     $threshold = clamp((int) round(($attacker['power'] ?? 0.05) * 20), 1, 20);
@@ -594,7 +586,6 @@ function moveAttack(&$state, &$me, &$opp, $pNum, $move) {
     $result = ['ok'=>true,'roll'=>$roll,'threshold'=>$threshold,'hit'=>$hit,'attack_data'=>['damage'=>0,'outcome'=>'tie']];
 
     $attacker['attacksMade']++;
-    $attacker['waitTurnsRemaining'] = max(($attacker['waitTurnsRemaining'] ?? 0), ($attacker['adverseWaitTurns'] ?? 0));
 
     if (!$hit) {
         $state['log'][] = ['msg' => "P{$pNum}'s {$attacker['name']} misses (roll {$roll}, needs ≤ {$threshold}).", 'type' => 'battle-log'];
@@ -665,8 +656,7 @@ function moveMeta(&$state, &$me, $pNum) {
         'adverseImpact' => 0,
         'adverseStars' => 5,
         'adverseStarsText' => '★★★★★',
-        'adverseWaitTurns' => 0,
-        'waitTurnsRemaining' => 0,
+        'requiresJobRelevance' => false,
         'rObs' => clamp($meanR * 1.25, 0.35, 0.9),
         'baseAtk' => clamp((int) round($meanAtk * 1.45), 2400, 5200),
         'atk' => 0,
@@ -675,7 +665,7 @@ function moveMeta(&$state, &$me, $pNum) {
         'attacksMade' => 0,
         'maxAttacks' => 2,
         'summoningSick' => true,
-        'hasReplication' => false,
+        'hasJobRelevance' => false,
         'rangeRestricted' => false,
         'isMeta' => true
     ];
@@ -692,10 +682,9 @@ function moveMeta(&$state, &$me, $pNum) {
 function resetMonstersForTurn(&$player) {
     foreach ($player['monsters'] as &$m) {
         if (!$m) continue;
-        if (($m['waitTurnsRemaining'] ?? 0) > 0) $m['waitTurnsRemaining']--;
         $m['summoningSick'] = false;
         $m['attacksMade'] = 0;
-        $m['maxAttacks'] = !empty($m['isMeta']) ? 2 : (!empty($m['hasReplication']) ? 2 : 1);
+        $m['maxAttacks'] = !empty($m['isMeta']) ? 2 : 1;
         refreshMonsterStats($m);
     }
 }
