@@ -87,14 +87,14 @@ function withLockedRoom($code, $callback) {
 
 function getConstructs() {
     return [
-        'cog_ability' => ['name'=>'Cognitive Ability','type'=>'predictor','short'=>'COG','avgR'=>0.65,'sprite'=>'🧠'],
-        'conscient' => ['name'=>'Conscientiousness','type'=>'predictor','short'=>'CON','avgR'=>0.45,'sprite'=>'📋'],
-        'struct_int' => ['name'=>'Struct. Interview','type'=>'predictor','short'=>'INT','avgR'=>0.55,'sprite'=>'🎤'],
-        'work_sample' => ['name'=>'Work Sample','type'=>'predictor','short'=>'WST','avgR'=>0.50,'sprite'=>'🔧'],
-        'job_perf' => ['name'=>'Job Performance','type'=>'outcome','short'=>'PERF','avgR'=>0.52,'sprite'=>'⭐'],
-        'turnover' => ['name'=>'Turnover','type'=>'outcome','short'=>'TURN','avgR'=>0.40,'sprite'=>'🚪'],
-        'job_sat' => ['name'=>'Job Satisfaction','type'=>'outcome','short'=>'SAT','avgR'=>0.48,'sprite'=>'😊'],
-        'ocb' => ['name'=>'OCB','type'=>'outcome','short'=>'OCB','avgR'=>0.44,'sprite'=>'🤝']
+        'cog_ability' => ['name'=>'Cognitive Ability','type'=>'predictor','short'=>'COG','avgR'=>0.65,'sprite'=>'🧠','indicators'=>[['name'=>'GMA Test','r'=>0.67],['name'=>'Wonderlic','r'=>0.63],['name'=>"Raven's",'r'=>0.64]]],
+        'conscient' => ['name'=>'Conscientiousness','type'=>'predictor','short'=>'CON','avgR'=>0.45,'sprite'=>'📋','indicators'=>[['name'=>'NEO-PI-R C','r'=>0.47],['name'=>'BFI Consc.','r'=>0.43],['name'=>'HEXACO C','r'=>0.45]]],
+        'struct_int' => ['name'=>'Struct. Interview','type'=>'predictor','short'=>'INT','avgR'=>0.55,'sprite'=>'🎤','indicators'=>[['name'=>'Behavioral','r'=>0.56],['name'=>'Situational','r'=>0.53],['name'=>'Panel Rtg','r'=>0.55]]],
+        'work_sample' => ['name'=>'Work Sample','type'=>'predictor','short'=>'WST','avgR'=>0.50,'sprite'=>'🔧','indicators'=>[['name'=>'In-Basket','r'=>0.48],['name'=>'Role Play','r'=>0.52],['name'=>'Present.','r'=>0.50]]],
+        'job_perf' => ['name'=>'Job Performance','type'=>'outcome','short'=>'PERF','avgR'=>0.52,'sprite'=>'⭐','indicators'=>[['name'=>'Super. Rtg','r'=>0.54],['name'=>'Obj. Output','r'=>0.50],['name'=>'Peer Rtg','r'=>0.52]]],
+        'turnover' => ['name'=>'Turnover','type'=>'outcome','short'=>'TURN','avgR'=>0.40,'sprite'=>'🚪','indicators'=>[['name'=>'Intent Quit','r'=>0.42],['name'=>'Actual Quit','r'=>0.38],['name'=>'Absent','r'=>0.40]]],
+        'job_sat' => ['name'=>'Job Satisfaction','type'=>'outcome','short'=>'SAT','avgR'=>0.48,'sprite'=>'😊','indicators'=>[['name'=>'JDI Scale','r'=>0.50],['name'=>'MSQ Score','r'=>0.47],['name'=>'Faces Scale','r'=>0.47]]],
+        'ocb' => ['name'=>'OCB','type'=>'outcome','short'=>'OCB','avgR'=>0.44,'sprite'=>'🤝','indicators'=>[['name'=>'OCBI Items','r'=>0.46],['name'=>'OCBO Items','r'=>0.42],['name'=>'Altruism','r'=>0.44]]]
     ];
 }
 
@@ -210,7 +210,7 @@ function getPowerValidityCoefficient($m) {
 function refreshMonsterStats(&$m) {
     if (!$m) return;
     if (!empty($m['isMeta'])) {
-        $m['power'] = clamp(0.9 + (($m['n'] ?? META_BASE_N) / 1200), 0.9, 0.99);
+        $m['power'] = clamp(($m['power'] ?? 0.95), 0.7, 0.99);
         $m['atk'] = $m['baseAtk'];
         return;
     }
@@ -239,20 +239,41 @@ function consumeAttackSample(&$monster) {
     if (!empty($monster['hasPracticeEffect'])) {
         $monster['validityMultiplier'] = max(0.03125, ($monster['validityMultiplier'] ?? 1.0) / 2);
     }
-    $monster['n'] = !empty($monster['isMeta']) ? META_BASE_N : ($monster['baseN'] ?? MONSTER_BASE_N);
+    if (!empty($monster['isMeta'])) {
+        $monster['n'] = $monster['baseN'] ?? META_BASE_N;
+        $monster['power'] = clamp(0.9 + (($monster['n'] ?? META_BASE_N) / 1200), 0.9, 0.99);
+        $monster['atk'] = $monster['baseAtk'];
+        return;
+    }
+
+    $monster['n'] = $monster['baseN'] ?? MONSTER_BASE_N;
     refreshMonsterStats($monster);
 }
 
-function makeItemCard($constructId, $construct) {
+function makeItemCard($constructId, $construct, $indicatorIndex = null) {
+    $indicators = $construct['indicators'] ?? [];
+    if (empty($indicators)) {
+        $indicators = [[
+            'name' => $construct['type'] === 'predictor' ? 'Item indicator' : 'Criterion indicator',
+            'r' => $construct['avgR']
+        ]];
+    }
+
+    if ($indicatorIndex === null) {
+        $picked = $indicators[random_int(0, count($indicators) - 1)];
+    } else {
+        $picked = $indicators[$indicatorIndex % count($indicators)];
+    }
+
     return [
         'isItem' => true,
         'type' => $construct['type'],
         'constructId' => $constructId,
         'construct' => $construct['name'],
         'short' => $construct['short'],
-        'avgR' => $construct['avgR'],
+        'avgR' => $picked['r'],
         'sprite' => $construct['sprite'],
-        'indicator' => $construct['type'] === 'predictor' ? 'Item indicator' : 'Criterion indicator'
+        'indicator' => $picked['name']
     ];
 }
 
@@ -289,7 +310,7 @@ function buildDeck() {
     $deck = [];
     foreach ($counts as $id => $n) {
         for ($i = 0; $i < $n; $i++) {
-            if (isset($constructs[$id])) $deck[] = makeItemCard($id, $constructs[$id]);
+            if (isset($constructs[$id])) $deck[] = makeItemCard($id, $constructs[$id], $i);
             else {
                 [$type, $name, $icon, $desc] = $spellDefs[$id];
                 $deck[] = makeSpellCard($id, $type, $name, $icon, $desc);
@@ -747,8 +768,8 @@ function moveMeta(&$state, &$me, $pNum) {
     $meta = [
         'name' => "Meta-{$short} Titan",
         'sprite' => '🌌',
-        'predId' => $target['type'] === 'pred' ? $id : 'META',
-        'outId' => $target['type'] === 'out' ? $id : 'META',
+        'predId' => 'META',
+        'outId' => 'META',
         'predAlpha' => 0.99,
         'outAlpha' => 0.99,
         'rTrue' => $metaRTrue,
@@ -759,8 +780,9 @@ function moveMeta(&$state, &$me, $pNum) {
         'rObs' => $metaRTrue,
         'baseAtk' => (int) round(abs($metaRTrue) * 10000),
         'atk' => 0,
+        'baseN' => META_BASE_N,
         'n' => META_BASE_N,
-        'power' => 0.97,
+        'power' => clamp(0.9 + (META_BASE_N / 1000), 0.9, 0.99),
         'attacksMade' => 0,
         'maxAttacks' => 2,
         'summoningSick' => false,
@@ -776,9 +798,8 @@ function moveMeta(&$state, &$me, $pNum) {
     ];
     refreshMonsterStats($meta);
 
-    $me['monsters'][0] = null;
-    $me['monsters'][2] = null;
-    $me['monsters'][1] = $meta;
+    $me['monsters'] = [null, null, null];
+    $me['monsters'][0] = $meta;
 
     $state['log'][] = ['msg' => "P{$pNum} performs META-ANALYSIS and summons {$meta['name']}!", 'type' => 'meta-log'];
     return ['ok'=>true,'msg'=>'Meta Analysis'];
