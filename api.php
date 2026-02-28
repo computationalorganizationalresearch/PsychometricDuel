@@ -186,11 +186,11 @@ function refreshMonsterStats(&$m) {
     $correctionBaseAtk = (int) round(abs($m['rTrue'] ?? 0) * $validityMultiplier * 10000);
     $effectiveAtkBase = !empty($m['correctionApplied']) ? $correctionBaseAtk : $m['baseAtk'];
     $rangeStacks = max(0, (int)($m['rangeRestrictionStacks'] ?? 0));
-    $m['atk'] = $rangeStacks > 0
-        ? (int) floor($effectiveAtkBase / (2 ** $rangeStacks))
-        : $effectiveAtkBase;
-    if ($rangeStacks > 0) $m['atk'] = (int) floor($m['baseAtk'] / (2 ** $rangeStacks));
-    else $m['atk'] = $m['baseAtk'];
+    $atk = $effectiveAtkBase;
+    for ($i = 0; $i < $rangeStacks; $i++) {
+        $atk = (int) round($atk / 2);
+    }
+    $m['atk'] = $atk;
 
     $m['power'] = approxPowerFromROBSandN(getPowerValidityCoefficient($m), $m['n'] ?? MONSTER_BASE_N);
 }
