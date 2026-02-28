@@ -1,4 +1,5 @@
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -953,8 +954,7 @@ const AI_DIFFICULTY_PROFILES = {
         metaMinAtk: 3200, metaUpgradeRatio: 1.05,
         attackWinBonus: 850, attackTieBonus: 120, attackLosePenalty: 520,
         attackerSelfRiskWeight: 0.35, defenderValueWeight: 0.22,
-        randomTargetChance: 0.28, battleGuard: 6, delayMs: 500,
-        mctsIterations: 60, mctsRolloutDepth: 3, mctsExploration: 1.35, targetSimulations: 8
+        randomTargetChance: 0.28, battleGuard: 6, delayMs: 500
     },
     balanced: {
         label: 'Balanced',
@@ -965,8 +965,7 @@ const AI_DIFFICULTY_PROFILES = {
         metaMinAtk: 2800, metaUpgradeRatio: 0.85,
         attackWinBonus: 1000, attackTieBonus: 220, attackLosePenalty: 360,
         attackerSelfRiskWeight: 0.22, defenderValueWeight: 0.32,
-        randomTargetChance: 0.08, battleGuard: 9, delayMs: 350,
-        mctsIterations: 130, mctsRolloutDepth: 4, mctsExploration: 1.2, targetSimulations: 14
+        randomTargetChance: 0.08, battleGuard: 9, delayMs: 350
     },
     strong: {
         label: 'Strong',
@@ -977,8 +976,7 @@ const AI_DIFFICULTY_PROFILES = {
         metaMinAtk: 2550, metaUpgradeRatio: 0.75,
         attackWinBonus: 1080, attackTieBonus: 260, attackLosePenalty: 250,
         attackerSelfRiskWeight: 0.18, defenderValueWeight: 0.38,
-        randomTargetChance: 0.0, battleGuard: 12, delayMs: 280,
-        mctsIterations: 240, mctsRolloutDepth: 5, mctsExploration: 1.05, targetSimulations: 24
+        randomTargetChance: 0.0, battleGuard: 12, delayMs: 280
     },
     expert: {
         label: 'Expert',
@@ -989,8 +987,7 @@ const AI_DIFFICULTY_PROFILES = {
         metaMinAtk: 2400, metaUpgradeRatio: 0.68,
         attackWinBonus: 1150, attackTieBonus: 300, attackLosePenalty: 170,
         attackerSelfRiskWeight: 0.12, defenderValueWeight: 0.45,
-        randomTargetChance: 0.0, battleGuard: 14, delayMs: 220,
-        mctsIterations: 420, mctsRolloutDepth: 6, mctsExploration: 0.95, targetSimulations: 40
+        randomTargetChance: 0.0, battleGuard: 14, delayMs: 220
     }
 };
 function getAIProfile() {
@@ -2099,129 +2096,6 @@ function aiTryMeta(pid) {
     }
     return false;
 }
-function withLocalState(tempState, fn) {
-    const prevState = localGame;
-    localGame = tempState;
-    try {
-        return fn();
-    } finally {
-        localGame = prevState;
-    }
-}
-function evaluateBoardFor(pid, state = localGame) {
-    const me = state.players[pid];
-    const enemy = state.players[pid === 1 ? 2 : 1];
-    const sumMonster = arr => arr.reduce((s, m) => s + (m ? (m.atk * (0.45 + m.power)) : 0), 0);
-    const liveMonsterCount = arr => arr.reduce((s, m) => s + (m ? 1 : 0), 0);
-
-    let score = 0;
-    score += (me.lp - enemy.lp) * 1.7;
-    score += (sumMonster(me.monsters) - sumMonster(enemy.monsters)) * 0.9;
-    score += (liveMonsterCount(me.monsters) - liveMonsterCount(enemy.monsters)) * 180;
-    score += (me.hand.length - enemy.hand.length) * 18;
-    score += (me.deck.length - enemy.deck.length) * 2;
-
-    if (state.status === 'finished') {
-        if (state.winner === pid) score += 20000;
-        else score -= 20000;
-    }
-    return score;
-}
-function aiMacroActions(pid) {
-    const p = localGame.players[pid];
-    const actions = [];
-    if (p.hand.some(c => c.isItem)) actions.push({ type: 'place_items' });
-    if (!p.summoned && firstEmptySlot(p.monsters) !== -1 && findBestSummonPair(p)) actions.push({ type: 'summon' });
-    if (p.hand.some(c => !c.isItem)) actions.push({ type: 'support' });
-    if (localCanMeta(p)) actions.push({ type: 'meta' });
-    if (p.monsters.some(m => canMonsterAttack(m))) actions.push({ type: 'battle' });
-    actions.push({ type: 'end_turn' });
-    return actions;
-}
-function applyAIMacroAction(pid, action) {
-    const before = JSON.stringify(localGame.players[pid]);
-    if (action.type === 'place_items') aiPlaceItems(pid);
-    else if (action.type === 'summon') aiTrySummon(pid);
-    else if (action.type === 'support') aiUseSupport(pid);
-    else if (action.type === 'meta') aiTryMeta(pid);
-    else if (action.type === 'battle') aiBattlePhase(pid);
-    else if (action.type === 'end_turn') applyLocalMove(pid, { type: 'end_turn' });
-
-    if (action.type === 'end_turn') return true;
-    const after = JSON.stringify(localGame.players[pid]);
-    return before !== after;
-}
-function aiRolloutAction(pid) {
-    const actions = aiMacroActions(pid);
-    const weighted = [];
-    actions.forEach(a => {
-        const w = a.type === 'end_turn' ? 1 : (a.type === 'battle' ? 4 : 3);
-        for (let i = 0; i < w; i++) weighted.push(a);
-    });
-    return weighted[randInt(0, weighted.length - 1)];
-}
-function runTurnMCTS(pid) {
-    const ai = getAIProfile();
-    const rootState = deepClone(localGame);
-    const rootActions = withLocalState(deepClone(rootState), () => aiMacroActions(pid));
-    if (!rootActions.length) return [{ type: 'end_turn' }];
-
-    const root = {
-        visits: 0,
-        value: 0,
-        action: null,
-        children: rootActions.map(a => ({ action: a, visits: 0, value: 0, seq: [a] }))
-    };
-
-    for (let iter = 0; iter < ai.mctsIterations; iter++) {
-        root.visits += 1;
-        let chosen = null;
-        let bestScore = -Infinity;
-
-        root.children.forEach(child => {
-            if (child.visits === 0) {
-                chosen = child;
-                bestScore = Infinity;
-                return;
-            }
-            if (bestScore === Infinity) return;
-            const exploit = child.value / child.visits;
-            const explore = ai.mctsExploration * Math.sqrt(Math.log(root.visits + 1) / child.visits);
-            const uct = exploit + explore;
-            if (uct > bestScore) { bestScore = uct; chosen = child; }
-        });
-
-        const simState = deepClone(rootState);
-        const reward = withLocalState(simState, () => {
-            let depth = 0;
-            let valid = applyAIMacroAction(pid, chosen.action);
-            if (!valid) return -400;
-
-            while (localGame.status === 'active' && localGame.currentPlayer === pid && depth < ai.mctsRolloutDepth) {
-                const a = aiRolloutAction(pid);
-                applyAIMacroAction(pid, a);
-                if (a.type === 'end_turn') break;
-                depth += 1;
-            }
-            if (localGame.currentPlayer === pid && localGame.status === 'active') {
-                applyLocalMove(pid, { type: 'end_turn' });
-            }
-            return evaluateBoardFor(pid);
-        });
-
-        chosen.visits += 1;
-        chosen.value += reward;
-    }
-
-    root.children.sort((a, b) => (b.value / Math.max(1, b.visits)) - (a.value / Math.max(1, a.visits)));
-    const best = root.children[0]?.action || { type: 'end_turn' };
-
-    const plan = [best];
-    if (best.type !== 'end_turn') {
-        plan.push({ type: 'support' }, { type: 'battle' }, { type: 'end_turn' });
-    }
-    return plan;
-}
 function aiPickAttackTarget(pid, attackerSlot) {
     const ai = getAIProfile();
     const p = localGame.players[pid];
@@ -2231,28 +2105,27 @@ function aiPickAttackTarget(pid, attackerSlot) {
     const enemyHasMonsters = enemy.monsters.some(Boolean);
     if (!enemyHasMonsters) return { target_type: 'lp', target_slot: null };
 
-    const options = [];
-    enemy.monsters.forEach((m, i) => {
-        if (m) options.push({ target_type: 'monster', target_slot: i });
+    const targetOptions = [];
+    enemy.monsters.forEach((d, i) => {
+        if (!d) return;
+        const sim = localAttackResolution(attacker, d);
+        let score = 0;
+        if (sim.outcome === 'win') score += ai.attackWinBonus + sim.damage + d.atk * ai.defenderValueWeight;
+        if (sim.outcome === 'tie') score += ai.attackTieBonus + d.atk * (ai.defenderValueWeight * 0.6);
+        if (sim.outcome === 'lose') score -= ai.attackLosePenalty + sim.damage + attacker.atk * ai.attackerSelfRiskWeight;
+        score *= attacker.power;
+        if (enemy.lp <= (sim.outcome === 'win' ? sim.damage : 0)) score += 5000;
+        targetOptions.push({ target_type: 'monster', target_slot: i, score });
     });
-    if (!options.length) return { target_type: 'lp', target_slot: null };
 
-    let best = options[0];
-    let bestScore = -Infinity;
-    options.forEach(option => {
-        let total = 0;
-        for (let i = 0; i < ai.targetSimulations; i++) {
-            const simState = deepClone(localGame);
-            const score = withLocalState(simState, () => {
-                applyLocalMove(pid, { type: 'attack', attacker_slot: attackerSlot, target_type: option.target_type, target_slot: option.target_slot });
-                return evaluateBoardFor(pid);
-            });
-            total += score;
-        }
-        const avg = total / ai.targetSimulations;
-        if (avg > bestScore) { bestScore = avg; best = option; }
-    });
-    return best;
+    if (!targetOptions.length) return { target_type: 'lp', target_slot: null };
+    if (ai.randomTargetChance > 0 && Math.random() < ai.randomTargetChance) {
+        const randomOption = targetOptions[randInt(0, targetOptions.length - 1)];
+        return { target_type: randomOption.target_type, target_slot: randomOption.target_slot };
+    }
+
+    targetOptions.sort((a, b) => b.score - a.score);
+    return { target_type: targetOptions[0].target_type, target_slot: targetOptions[0].target_slot };
 }
 function aiBattlePhase(pid) {
     const ai = getAIProfile();
@@ -2263,7 +2136,9 @@ function aiBattlePhase(pid) {
         let bestSlot = -1, bestScore = -Infinity;
         p.monsters.forEach((m, i) => {
             if (!canMonsterAttack(m)) return;
-            const score = m.atk * (0.5 + m.power) + (m.hasReplication ? 280 : 0) - (m.attacksMade * 80);
+            let score = m.atk * m.power + (m.hasReplication ? 220 : 0);
+            if (m.attacksMade === 0) score += 30;
+            if (m.power >= 0.9) score += 40;
             if (score > bestScore) { bestScore = score; bestSlot = i; }
         });
         if (bestSlot === -1) break;
@@ -2279,12 +2154,18 @@ async function runSinglePlayerAI() {
     await new Promise(r => setTimeout(r, ai.delayMs));
 
     const pid = 2;
-    const plan = runTurnMCTS(pid);
-    for (const action of plan) {
-        if (localGame.status !== 'active' || localGame.currentPlayer !== pid) break;
-        applyAIMacroAction(pid, action);
-        if (action.type === 'end_turn') break;
+    aiPlaceItems(pid);
+    aiTrySummon(pid);
+    aiUseSupport(pid);
+    aiTryMeta(pid);
+    aiUseSupport(pid);
+    if (session.aiDifficulty === 'strong' || session.aiDifficulty === 'expert') {
+        aiPlaceItems(pid);
+        aiTrySummon(pid);
+        aiUseSupport(pid);
+        aiTryMeta(pid);
     }
+    aiBattlePhase(pid);
 
     if (localGame.status === 'active' && localGame.currentPlayer === pid) {
         applyLocalMove(pid, { type: 'end_turn' });
