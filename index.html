@@ -1986,12 +1986,22 @@ function enumerateCandidateMoves(state, pid) {
     const p = state.players[pid];
     const moves = [];
 
+    const wouldFillAllConstructSlotsWithSameType = (slot, cardType) => {
+        if (p.constructs[slot]) return false;
+        const occupiedTypes = p.constructs
+            .filter(Boolean)
+            .map(stack => stack.type);
+        occupiedTypes.push(cardType);
+        return occupiedTypes.length === 3 && occupiedTypes.every(type => type === cardType);
+    };
+
     p.hand.forEach((card, hand_index) => {
         if (card.isItem) {
             for (let slot = 0; slot < 3; slot++) {
                 const stack = p.constructs[slot];
                 if (stack && stack.constructId !== card.constructId) continue;
                 if (stack && stack.cards.length >= 3) continue;
+                if (wouldFillAllConstructSlotsWithSameType(slot, card.type)) continue;
                 moves.push({ type: 'place_card', hand_index, slot });
             }
         } else {
