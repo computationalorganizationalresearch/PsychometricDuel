@@ -126,6 +126,30 @@
         display: grid; grid-template-columns: 1fr 1fr; gap: 1cqmin;
         width: min(56cqmin, 90%);
     }
+    .deck-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 1cqmin;
+        width: min(56cqmin, 90%);
+        margin: 0.6cqmin 0 0.4cqmin;
+    }
+    .deck-btn {
+        font-family: 'Press Start 2P', monospace;
+        font-size: 0.92cqmin;
+        color: var(--gold);
+        background: #111;
+        border: 0.25cqmin solid var(--gold-dark);
+        padding: 1.1cqmin;
+        cursor: pointer;
+        text-align: left;
+        line-height: 1.55;
+    }
+    .deck-btn:hover { border-color: var(--gold); }
+    .deck-btn.active {
+        background: rgba(255,204,0,0.14);
+        border-color: var(--gold);
+        box-shadow: 0 0 0.8cqmin rgba(255,204,0,0.35);
+    }
     .difficulty-btn {
         font-family: 'Press Start 2P', monospace;
         font-size: 1cqmin;
@@ -637,6 +661,13 @@
 
         <div id="single-menu" class="lobby-section" style="display:none;">
             <div class="menu-subtitle">SINGLE PLAYER MODE SELECTOR</div>
+            <div class="menu-subtitle" style="color:var(--spell);">CHOOSE DECK PRESET</div>
+            <div class="deck-grid" id="deck-grid">
+                <button class="deck-btn" data-deck="tempo_toolbox" onclick="selectDeckPreset('tempo_toolbox')">TEMPO TOOLBOX · balanced 14/10 split</button>
+                <button class="deck-btn" data-deck="combo_ramp" onclick="selectDeckPreset('combo_ramp')">COMBO RAMP · proactive pressure 18/6 split</button>
+                <button class="deck-btn" data-deck="control_lock" onclick="selectDeckPreset('control_lock')">CONTROL LOCK · disruption-heavy 10/14 split</button>
+            </div>
+            <div class="lobby-status" id="deck-preset-desc"></div>
             <div class="menu-subtitle" style="color:var(--predictor-light);">CHOOSE AI DIFFICULTY</div>
             <div class="difficulty-grid" id="difficulty-grid">
                 <button class="difficulty-btn" data-difficulty="rookie" onclick="selectAIDifficulty('rookie')">ROOKIE</button>
@@ -743,7 +774,7 @@
         <div class="modal-box">
             <div class="gallery-header">
                 <h2>CARD GALLERY</h2>
-                <div class="gallery-subtitle">Retro binder mode — scroll each row like classic handheld duels.</div>
+                <div class="gallery-subtitle">Retro binder mode — includes all cards plus full 48-card deck preset breakdowns.</div>
             </div>
             <div class="gallery-scroll" id="card-gallery-content"></div>
             <button class="how-to-btn" style="display:block; margin: 2cqmin auto 0;" onclick="closeCardGallery()">BACK TO MENU</button>
@@ -949,6 +980,38 @@ const AI_DIFFICULTY_PROFILES = window.PsychometricDuelMctsAI?.PROFILES || {
     strong: { label: 'Strong', description: 'Optimized AI', thinkMs: 1800 },
     expert: { label: 'Expert', description: 'Very strong AI', thinkMs: 3600 }
 };
+const DECK_PRESETS = {
+    tempo_toolbox: {
+        label: 'Tempo Toolbox',
+        description: 'Balanced pressure and interaction. Strong default ladder choice.',
+        counts: {
+            cog_ability: 3, conscient: 3, struct_int: 3, work_sample: 3,
+            job_perf: 3, turnover: 3, job_sat: 3, ocb: 3,
+            sample_size: 3, job_relevance: 2, imputation: 2, correction: 2, p_hacking: 2, bootstrapping: 2, item_analysis: 1,
+            missing_data: 2, range_restrict: 2, item_leakage: 2, construct_drift: 2, criterion_contam: 1, practice_effect: 1
+        }
+    },
+    combo_ramp: {
+        label: 'Combo Ramp',
+        description: 'Fast scaling through sample and reliability engines; lighter disruption.',
+        counts: {
+            cog_ability: 3, conscient: 3, struct_int: 3, work_sample: 3,
+            job_perf: 3, turnover: 3, job_sat: 3, ocb: 3,
+            sample_size: 4, job_relevance: 2, imputation: 2, correction: 3, p_hacking: 3, bootstrapping: 3, item_analysis: 1,
+            missing_data: 1, range_restrict: 1, item_leakage: 1, construct_drift: 1, criterion_contam: 1, practice_effect: 1
+        }
+    },
+    control_lock: {
+        label: 'Control Lock',
+        description: 'Heavy denial package for anti-combo matchups and resource suppression.',
+        counts: {
+            cog_ability: 3, conscient: 3, struct_int: 3, work_sample: 3,
+            job_perf: 3, turnover: 3, job_sat: 3, ocb: 3,
+            sample_size: 2, job_relevance: 2, imputation: 2, correction: 1, p_hacking: 1, bootstrapping: 1, item_analysis: 1,
+            missing_data: 3, range_restrict: 3, item_leakage: 3, construct_drift: 2, criterion_contam: 2, practice_effect: 1
+        }
+    }
+};
 function getAIProfile() {
     const key = session?.aiDifficulty || 'strong';
     return AI_DIFFICULTY_PROFILES[key] || AI_DIFFICULTY_PROFILES.strong;
@@ -962,7 +1025,25 @@ function showMenu(view) {
     if (main) main.style.display = (view === 'main') ? 'flex' : 'none';
     if (online) online.style.display = (view === 'online') ? 'flex' : 'none';
     if (single) single.style.display = (view === 'single') ? 'flex' : 'none';
-    if (view === 'single') updateAIDifficultyUI();
+    if (view === 'single') {
+        updateDeckPresetUI();
+        updateAIDifficultyUI();
+    }
+}
+function updateDeckPresetUI() {
+    const key = session?.deckPreset || 'tempo_toolbox';
+    document.querySelectorAll('#deck-grid .deck-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.deck === key);
+    });
+    const desc = document.getElementById('deck-preset-desc');
+    if (!desc) return;
+    const preset = DECK_PRESETS[key] || DECK_PRESETS.tempo_toolbox;
+    desc.innerHTML = `<span style="color:var(--gold)">${preset.label}</span> — ${preset.description}`;
+}
+function selectDeckPreset(key) {
+    if (!DECK_PRESETS[key]) return;
+    session.deckPreset = key;
+    updateDeckPresetUI();
 }
 function updateAIDifficultyUI() {
     const key = session?.aiDifficulty || 'strong';
@@ -1076,12 +1157,69 @@ function onGalleryCardKeydown(event) {
 }
 
 function renderGallerySection(title, cards) {
+    if (!cards.length) return '';
     return `
         <section class="gallery-section">
             <div class="gallery-section-title">${title}</div>
             <div class="gallery-cards-row">${cards.map(renderGalleryCard).join('')}</div>
         </section>
     `;
+}
+
+function makeGalleryCardFromRuntimeCard(card, slotNumber) {
+    if (card?.isItem) {
+        const c = CONSTRUCTS[card.constructId] || {};
+        const isPred = card.type === 'predictor';
+        const pairings = isPred
+            ? Object.entries(TRUE_VALIDITY[card.constructId] || []).map(([outId, validity]) => {
+                const fairness = getPairAdverseImpact(card.constructId, outId);
+                return { pair: CONSTRUCTS[outId].short, validity, fairnessStars: fairness.starsText };
+            })
+            : Object.keys(TRUE_VALIDITY)
+                .filter(predId => TRUE_VALIDITY[predId]?.[card.constructId] !== undefined)
+                .map(predId => {
+                    const validity = TRUE_VALIDITY[predId][card.constructId];
+                    const fairness = getPairAdverseImpact(predId, card.constructId);
+                    return { pair: CONSTRUCTS[predId].short, validity, fairnessStars: fairness.starsText };
+                });
+        return {
+            cssClass: isPred ? 'predictor' : 'outcome',
+            badge: `${isPred ? 'PREDICTOR' : 'OUTCOME'} · SLOT ${slotNumber}`,
+            name: `${card.construct} — ${card.indicator}`,
+            icon: card.sprite || c.sprite || '●',
+            detailType: 'pairings',
+            reliabilityLabel: 'r',
+            reliability: card.avgR,
+            pairings
+        };
+    }
+
+    const source = LOCAL_SPELL_CARDS[card.id] || card;
+    const isTrap = source.type === 'trap';
+    return {
+        cssClass: isTrap ? 'trap' : 'spell',
+        badge: `${isTrap ? 'TRAP' : 'SPELL'} · SLOT ${slotNumber}`,
+        name: source.name,
+        icon: source.icon,
+        copy: source.desc
+    };
+}
+
+function buildDeckCardsForGallery(presetKey) {
+    const preset = DECK_PRESETS[presetKey];
+    if (!preset) return [];
+    const cards = [];
+    Object.entries(preset.counts).forEach(([id, n]) => {
+        for (let i = 0; i < n; i += 1) {
+            if (CONSTRUCTS[id]) {
+                const indicators = CONSTRUCTS[id].indicators || [];
+                cards.push(makeItemCard(id, indicators.length ? i : null));
+            } else {
+                cards.push(makeSpellCard(id));
+            }
+        }
+    });
+    return cards;
 }
 
 function renderCardGallery() {
@@ -1169,13 +1307,20 @@ function renderCardGallery() {
         copy: 'Fuse 3 monsters. Keeps strongest effect estimate and powers late-game swings.'
     }];
 
+    const presetSections = Object.entries(DECK_PRESETS).map(([presetKey, preset]) => {
+        const cards = buildDeckCardsForGallery(presetKey)
+            .map((card, idx) => makeGalleryCardFromRuntimeCard(card, idx + 1));
+        return renderGallerySection(`Deck Preset — ${preset.label} (${cards.length} cards)`, cards);
+    });
+
     container.innerHTML = [
         renderGallerySection('Predictors', predictorCards),
         renderGallerySection('Outcome', outcomeCards),
         renderGallerySection('Monsters', monsters),
         renderGallerySection('Spells', spells),
         renderGallerySection('Traps', traps),
-        renderGallerySection('Meta', meta)
+        renderGallerySection('Meta', meta),
+        ...presetSections
     ].join('');
 }
 
@@ -1383,18 +1528,10 @@ function makeItemCard(constructId, indicatorIndex = null) {
 function makeSpellCard(id) {
     return deepClone(LOCAL_SPELL_CARDS[id]);
 }
-function buildStartingDeck() {
+function buildStartingDeck(presetKey = 'tempo_toolbox') {
     const deck = [];
-    const counts = {
-        cog_ability: 4, conscient: 4, struct_int: 4, work_sample: 4,
-        job_perf: 4, turnover: 4, job_sat: 4, ocb: 4,
-
-        sample_size: 5, job_relevance: 4, imputation: 3, missing_data: 3, range_restrict: 4, item_leakage: 3, correction: 3, p_hacking: 3, practice_effect: 3,
-
-        // New additions
-        bootstrapping: 4, item_analysis: 3,
-        construct_drift: 3, criterion_contam: 3
-    };
+    const preset = DECK_PRESETS[presetKey] || DECK_PRESETS.tempo_toolbox;
+    const counts = preset.counts;
     Object.entries(counts).forEach(([id, n]) => {
         for (let i = 0; i < n; i++) {
             if (CONSTRUCTS[id]) {
@@ -1640,6 +1777,8 @@ async function localSubmitMulligan(indices) {
 }
 
 function initLocalGame() {
+    const deckPresetKey = session?.deckPreset || 'tempo_toolbox';
+    const selectedPreset = DECK_PRESETS[deckPresetKey] || DECK_PRESETS.tempo_toolbox;
     localGame = {
         status: 'active',
         currentPlayer: 1,
@@ -1647,8 +1786,8 @@ function initLocalGame() {
         log: [],
         mulligan: { phase: true, done: { 1: false, 2: false } },
         players: {
-            1: { lp: 8000, deck: buildStartingDeck(), hand: [], constructs: [null, null, null], monsters: [null, null, null], summoned: false },
-            2: { lp: 8000, deck: buildStartingDeck(), hand: [], constructs: [null, null, null], monsters: [null, null, null], summoned: false }
+            1: { lp: 8000, deck: buildStartingDeck(deckPresetKey), hand: [], constructs: [null, null, null], monsters: [null, null, null], summoned: false },
+            2: { lp: 8000, deck: buildStartingDeck(deckPresetKey), hand: [], constructs: [null, null, null], monsters: [null, null, null], summoned: false }
         }
     };
 
@@ -1659,7 +1798,7 @@ function initLocalGame() {
     localMulligan(2, aiMull);
 
     const aiProfile = getAIProfile();
-    logLocal(`Single-player mode started. You are P1. ${aiProfile.label} AI is P2.`, 'meta-log');
+    logLocal(`Single-player mode started. Deck preset: ${selectedPreset.label}. You are P1. ${aiProfile.label} AI is P2.`, 'meta-log');
     logLocal(`Opening hands drawn (${STARTING_HAND_SIZE}). Select any cards to mulligan before turn 1.`, 'info-log');
 }
 function projectStateForPlayer(pid) {
@@ -2138,7 +2277,8 @@ let session = {
     playerNum: null,
     pollTimer: null,
     gameMode: 'online',
-    aiDifficulty: 'strong'
+    aiDifficulty: 'strong',
+    deckPreset: 'tempo_toolbox'
 };
 
 // Local mirror of the filtered server state
@@ -3101,6 +3241,7 @@ function showTutorial() { document.getElementById('tutorial-modal').classList.ad
 function closeTutorial() { document.getElementById('tutorial-modal').classList.remove('active'); }
 
 showMenu('main');
+updateDeckPresetUI();
 updateAIDifficultyUI();
 </script>
 </body>
