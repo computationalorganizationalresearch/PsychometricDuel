@@ -1940,6 +1940,11 @@ function applyLocalMove(pid, move) {
             logLocal(`P${pid}'s ${attacker.name} attacks and rolls ${roll} (needs ≤ ${threshold}). Type II error — attack misses.`, 'battle-log');
             attackSampleResult = consumeAttackSample(attacker);
         } else {
+            const opponentHasMonsters = opp.monsters.some(monster => monster !== null);
+            if (move.target_type === 'lp' && opponentHasMonsters) {
+                return { success: false, message: 'You must attack an enemy monster first' };
+            }
+
             if (move.target_type === 'lp') {
                 const dmg = attacker.atk;
                 opp.lp = Math.max(0, opp.lp - dmg);
@@ -1949,7 +1954,11 @@ function applyLocalMove(pid, move) {
             } else {
                 const defender = opp.monsters[move.target_slot];
                 if (!defender) {
-                    logLocal(`P${pid}'s attack fizzles: target no longer exists.`, 'error-log');
+                    if (opponentHasMonsters) return { success: false, message: 'No defender in that slot' };
+                    const dmg = attacker.atk;
+                    opp.lp = Math.max(0, opp.lp - dmg);
+                    move_result.attack_data = { damage: dmg, outcome: 'win' };
+                    logLocal(`P${pid}'s ${attacker.name} attacks directly for ${dmg} LP damage!`, 'battle-log');
                     attackSampleResult = consumeAttackSample(attacker);
                 } else {
                     const outcome = localAttackResolution(attacker, defender);
@@ -2063,10 +2072,11 @@ function enumerateCandidateMoves(state, pid) {
 
     if (localCanMeta(p)) moves.push({ type: 'meta' });
 
+    const opponentHasMonsters = state.players[pid === 1 ? 2 : 1].monsters.some(monster => monster !== null);
     p.monsters.forEach((m, attacker_slot) => {
         if (!canMonsterAttack(m)) return;
-        moves.push({ type: 'attack', attacker_slot, target_type: 'lp', target_slot: null });
         const opp = state.players[pid === 1 ? 2 : 1];
+        if (!opponentHasMonsters) moves.push({ type: 'attack', attacker_slot, target_type: 'lp', target_slot: null });
         opp.monsters.forEach((target, target_slot) => {
             if (target) moves.push({ type: 'attack', attacker_slot, target_type: 'monster', target_slot });
         });
