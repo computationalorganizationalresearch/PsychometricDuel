@@ -1385,16 +1385,30 @@ function makeSpellCard(id) {
 }
 function buildStartingDeck() {
     const deck = [];
-    const counts = {
-        cog_ability: 4, conscient: 4, struct_int: 4, work_sample: 4,
-        job_perf: 4, turnover: 4, job_sat: 4, ocb: 4,
+const counts = {
+    // All constructs present at 4x (32 total)
+    cog_ability: 4, conscient: 4, struct_int: 4, work_sample: 4,
+    job_perf: 4, turnover: 4, job_sat: 4, ocb: 4,
 
-        sample_size: 5, job_relevance: 4, imputation: 3, missing_data: 3, range_restrict: 4, item_leakage: 3, correction: 3, p_hacking: 3, practice_effect: 3,
+    // Core support / resources / interaction (24 total)
+    sample_size: 3,       // core N-ramp, but not overwhelming
+    job_relevance: 4,     // important because many pairings are fairness-gated
+    imputation: 1,        // protection exists, but not too many dead draws
+    missing_data: 1,      // powerful universal removal kept as a singleton
+    range_restrict: 2,    // common interactive combat tool
+    item_leakage: 2,      // tactical answer; temporary shutdown
+    correction: 2,        // burst line / skill expression
+    p_hacking: 1,         // flashy finisher, but singleton to reduce swinginess
+    practice_effect: 2,   // long-game attrition angle in mirror
 
-        // New additions
-        bootstrapping: 4, item_analysis: 3,
-        construct_drift: 3, criterion_contam: 3
-    };
+    // Engine cards
+    bootstrapping: 2,     // permanent N engine
+    item_analysis: 2,     // reliability/stack engine
+
+    // Denial package (light, for variety but not lockouts)
+    construct_drift: 1,
+    criterion_contam: 1
+};
     Object.entries(counts).forEach(([id, n]) => {
         for (let i = 0; i < n; i++) {
             if (CONSTRUCTS[id]) {
