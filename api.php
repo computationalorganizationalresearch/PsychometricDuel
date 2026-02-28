@@ -189,6 +189,8 @@ function refreshMonsterStats(&$m) {
     $m['atk'] = $rangeStacks > 0
         ? (int) floor($effectiveAtkBase / (2 ** $rangeStacks))
         : $effectiveAtkBase;
+    if ($rangeStacks > 0) $m['atk'] = (int) floor($m['baseAtk'] / (2 ** $rangeStacks));
+    else $m['atk'] = $m['baseAtk'];
 
     $m['power'] = approxPowerFromROBSandN(getPowerValidityCoefficient($m), $m['n'] ?? MONSTER_BASE_N);
 }
