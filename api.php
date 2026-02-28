@@ -15,8 +15,8 @@ if (!is_dir($DATA_DIR)) mkdir($DATA_DIR, 0777, true);
 
 const MAX_HAND_SIZE = 10;
 const STARTING_HAND_SIZE = 10;
-const MONSTER_BASE_N = 20;
-const META_BASE_N = 20;
+const MONSTER_BASE_N = 50;
+const META_BASE_N = 50;
 
 $MONSTER_SPRITES = ['⚔️','🐉','🦁','🔥','💎','🌟','🗡️','🛡️','👁️','🌀'];
 
@@ -157,16 +157,53 @@ function spearmanBrown($k, $avgR) {
 }
 
 function approxPowerFromROBSandN($rObs, $n) {
-    $effect = abs($rObs) * sqrt(max(5, $n));
-    $z = ($effect - 1.35) * 1.15;
-    return clamp(1 / (1 + exp(-$z)), 0.05, 0.99);
+    $alpha = 0.05;
+    $sampleN = max(4, (int)floor($n ?? 0));
+    $r = clamp(abs($rObs), 0, 0.999999);
+    $fisherZ = 0.5 * log((1 + $r) / (1 - $r));
+    $nonCentrality = $fisherZ * sqrt($sampleN - 3);
+    $zCritical = inverseNormalCdf(1 - $alpha / 2);
+    $beta = normalCdf($zCritical - $nonCentrality) - normalCdf(-$zCritical - $nonCentrality);
+    return clamp(1 - $beta, 0.05, 0.99);
+}
+
+function normalCdf($z) {
+    $t = 1 / (1 + 0.2316419 * abs($z));
+    $d = 0.3989423 * exp(-$z * $z / 2);
+    $p = $d * $t * (0.3193815 + $t * (-0.3565638 + $t * (1.781478 + $t * (-1.821256 + $t * 1.330274))));
+    return $z >= 0 ? 1 - $p : $p;
+}
+
+function inverseNormalCdf($p) {
+    $a = [-39.6968302866538, 220.946098424521, -275.928510446969, 138.357751867269, -30.6647980661472, 2.50662827745924];
+    $b = [-54.4760987982241, 161.585836858041, -155.698979859887, 66.8013118877197, -13.2806815528857];
+    $c = [-0.00778489400243029, -0.322396458041136, -2.40075827716184, -2.54973253934373, 4.37466414146497, 2.93816398269878];
+    $d = [0.00778469570904146, 0.32246712907004, 2.445134137143, 3.75440866190742];
+    $low = 0.02425;
+    $high = 1 - $low;
+    $pp = clamp((float)$p, 1e-12, 1 - 1e-12);
+
+    if ($pp < $low) {
+        $q = sqrt(-2 * log($pp));
+        return (((((($c[0] * $q + $c[1]) * $q + $c[2]) * $q + $c[3]) * $q + $c[4]) * $q + $c[5])
+            / ((((($d[0] * $q + $d[1]) * $q + $d[2]) * $q + $d[3]) * $q) + 1));
+    }
+
+    if ($pp > $high) {
+        $q = sqrt(-2 * log(1 - $pp));
+        return -((((((($c[0] * $q + $c[1]) * $q + $c[2]) * $q + $c[3]) * $q + $c[4]) * $q + $c[5])
+            / ((((($d[0] * $q + $d[1]) * $q + $d[2]) * $q + $d[3]) * $q) + 1)));
+    }
+
+    $q = $pp - 0.5;
+    $r = $q * $q;
+    return (((((($a[0] * $r + $a[1]) * $r + $a[2]) * $r + $a[3]) * $r + $a[4]) * $r + $a[5]) * $q)
+        / (((((($b[0] * $r + $b[1]) * $r + $b[2]) * $r + $b[3]) * $r + $b[4]) * $r) + 1);
 }
 
 function getPowerValidityCoefficient($m) {
     if (!$m) return 0;
-    $validityMultiplier = max(0, (float)($m['validityMultiplier'] ?? 1.0));
-    $coeff = !empty($m['correctionApplied']) ? abs($m['rTrue'] ?? 0) : abs($m['rObs'] ?? 0);
-    return $coeff * $validityMultiplier;
+    return max(0, abs($m['atk'] ?? 0) / 10000);
 }
 
 function refreshMonsterStats(&$m) {
@@ -232,7 +269,7 @@ function buildDeck() {
     ];
 
     $spellDefs = [
-        'sample_size'=>['resource','Sample Size','N+100','Increase target friendly monster sample size (N), boosting power.'],
+        'sample_size'=>['resource','Sample Size','N+150','Increase target friendly monster sample size (N), boosting power.'],
         'job_relevance'=>['spell','Job Relevance','📌','Equip to your monster. Monsters with ★★★☆☆ or less need this to attack.'],
         'imputation'=>['spell','Imputation','🩹','Equip to your monster. If Missing Data targets it, Imputation is destroyed instead.'],
         'missing_data'=>['trap','Missing Data','∅','Destroy any card on the field.'],
@@ -240,7 +277,7 @@ function buildDeck() {
         'correction'=>['resource','Correction for Attenuation','↺','Target your monster. Set ATK to r_true × 10,000 for this turn.'],
         'p_hacking'=>['spell','P-hacking','🎯','Equip to your monster. Its next attack cannot miss, then it is destroyed at the end of that attack.'],
         'practice_effect'=>['trap','Practice Effect','🌀','Equip to a monster. After it attacks, halve its current validity coefficient.'],
-        'bootstrapping'=>['spell','Bootstrapping','🧮','Target your monster. Permanently increase its base N by 30.'],
+        'bootstrapping'=>['spell','Bootstrapping','🧮','Target your monster. Permanently increase its base N by 50.'],
         'item_analysis'=>['spell','Automated Item Generation','🧩','Target your construct stack. Add one matching item (max 3) to improve reliability.'],
         'construct_drift'=>['trap','Construct Drift','↘','Target enemy construct. Remove one stacked item (or destroy stack if only one).'],
         'criterion_contam'=>['trap','Attrition','⚠','Target enemy monster. Permanently halve N.'],
@@ -545,7 +582,7 @@ function movePlaySpell(&$state, &$me, &$opp, $pNum, $move) {
     $id = $card['id'];
     if ($id === 'sample_size') {
         if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Sample Size must target your monster'];
-        $me['monsters'][$targetSlot]['n'] = clamp(($me['monsters'][$targetSlot]['n'] ?? MONSTER_BASE_N) + 100, MONSTER_BASE_N, 420);
+        $me['monsters'][$targetSlot]['n'] = clamp(($me['monsters'][$targetSlot]['n'] ?? MONSTER_BASE_N) + 150, MONSTER_BASE_N, 420);
         refreshMonsterStats($me['monsters'][$targetSlot]);
     } elseif ($id === 'job_relevance') {
         if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Job Relevance must target your monster'];
@@ -593,8 +630,8 @@ function movePlaySpell(&$state, &$me, &$opp, $pNum, $move) {
         refreshMonsterStats($me['monsters'][$targetSlot]);
     } elseif ($id === 'bootstrapping') {
         if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Bootstrapping must target your monster'];
-        $me['monsters'][$targetSlot]['baseN'] = ($me['monsters'][$targetSlot]['baseN'] ?? MONSTER_BASE_N) + 30;
-        $me['monsters'][$targetSlot]['n'] = ($me['monsters'][$targetSlot]['n'] ?? MONSTER_BASE_N) + 30;
+        $me['monsters'][$targetSlot]['baseN'] = ($me['monsters'][$targetSlot]['baseN'] ?? MONSTER_BASE_N) + 50;
+        $me['monsters'][$targetSlot]['n'] = ($me['monsters'][$targetSlot]['n'] ?? MONSTER_BASE_N) + 50;
         refreshMonsterStats($me['monsters'][$targetSlot]);
     } elseif ($id === 'item_analysis') {
         if ($targetType !== 'construct' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Automated Item Generation must target your construct'];
