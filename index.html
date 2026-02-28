@@ -850,6 +850,7 @@
 
 <div class="tooltip" id="tooltip"></div>
 
+<script src="ai/singlePlayerMcts.js"></script>
 <script>
 // ==================== CONFIG ====================
 const API_URL = 'api.php'; // Change to your API endpoint
@@ -941,51 +942,11 @@ const MONSTER_SPRITES = ['⚔️','🐉','🦁','🔥','💎','🌟','🗡️','
 function spearmanBrown(k, avgR) { return (k * avgR) / (1 + (k - 1) * avgR); }
 
 // ==================== LOCAL SINGLE-PLAYER ENGINE ====================
-const AI_DIFFICULTY_PROFILES = {
-    rookie: {
-        label: 'Rookie',
-        description: 'Forgiving AI: simpler sequencing, fewer optimizations, weaker target selection.',
-        maxPlacementLoops: 8, placeNoise: 10, supportLoopCap: 10,
-        rangeRestrictThreshold: 1600, missingDataThreatThreshold: 2300, missingDataConstructStackMin: 3,
-        jobRelevanceThreshold: 1200, samplePowerTarget: 0.78, sampleNTarget: 80,
-        metaMinAtk: 3200, metaUpgradeRatio: 1.05,
-        attackWinBonus: 850, attackTieBonus: 120, attackLosePenalty: 520,
-        attackerSelfRiskWeight: 0.35, defenderValueWeight: 0.22,
-        randomTargetChance: 0.28, battleGuard: 6, delayMs: 500
-    },
-    balanced: {
-        label: 'Balanced',
-        description: 'Solid AI: sensible stacking, support timing, and target priorities without perfect play.',
-        maxPlacementLoops: 14, placeNoise: 5, supportLoopCap: 16,
-        rangeRestrictThreshold: 1300, missingDataThreatThreshold: 1900, missingDataConstructStackMin: 2,
-        jobRelevanceThreshold: 950, samplePowerTarget: 0.86, sampleNTarget: 120,
-        metaMinAtk: 2800, metaUpgradeRatio: 0.85,
-        attackWinBonus: 1000, attackTieBonus: 220, attackLosePenalty: 360,
-        attackerSelfRiskWeight: 0.22, defenderValueWeight: 0.32,
-        randomTargetChance: 0.08, battleGuard: 9, delayMs: 350
-    },
-    strong: {
-        label: 'Strong',
-        description: 'Optimized AI: builds reliability stacks, powers attacks, and punishes threats.',
-        maxPlacementLoops: 20, placeNoise: 1, supportLoopCap: 22,
-        rangeRestrictThreshold: 1150, missingDataThreatThreshold: 1750, missingDataConstructStackMin: 2,
-        jobRelevanceThreshold: 850, samplePowerTarget: 0.90, sampleNTarget: 140,
-        metaMinAtk: 2550, metaUpgradeRatio: 0.75,
-        attackWinBonus: 1080, attackTieBonus: 260, attackLosePenalty: 250,
-        attackerSelfRiskWeight: 0.18, defenderValueWeight: 0.38,
-        randomTargetChance: 0.0, battleGuard: 12, delayMs: 280
-    },
-    expert: {
-        label: 'Expert',
-        description: 'Very strong AI: tighter sequencing, earlier power investment, and sharper battle heuristics.',
-        maxPlacementLoops: 24, placeNoise: 0, supportLoopCap: 28,
-        rangeRestrictThreshold: 1000, missingDataThreatThreshold: 1550, missingDataConstructStackMin: 2,
-        jobRelevanceThreshold: 700, samplePowerTarget: 0.93, sampleNTarget: 180,
-        metaMinAtk: 2400, metaUpgradeRatio: 0.68,
-        attackWinBonus: 1150, attackTieBonus: 300, attackLosePenalty: 170,
-        attackerSelfRiskWeight: 0.12, defenderValueWeight: 0.45,
-        randomTargetChance: 0.0, battleGuard: 14, delayMs: 220
-    }
+const AI_DIFFICULTY_PROFILES = window.PsychometricDuelMctsAI?.PROFILES || {
+    rookie: { label: 'Rookie', description: 'Forgiving AI', thinkMs: 220 },
+    balanced: { label: 'Balanced', description: 'Solid AI', thinkMs: 700 },
+    strong: { label: 'Strong', description: 'Optimized AI', thinkMs: 1800 },
+    expert: { label: 'Expert', description: 'Very strong AI', thinkMs: 3600 }
 };
 function getAIProfile() {
     const key = session?.aiDifficulty || 'strong';
@@ -1871,297 +1832,104 @@ function applyLocalMove(pid, move) {
     return { success: true, move_result };
 }
 
-function aiBestCardIndices(hand, predicate) {
-    const out = [];
-    hand.forEach((c, i) => { if (predicate(c)) out.push(i); });
-    return out;
-}
-function aiPlaceItems(pid) {
-    const p = localGame.players[pid];
-    let progressed = false;
-    const ai = getAIProfile();
-    let safety = 0;
-    while (safety++ < ai.maxPlacementLoops) {
-        let best = null;
-        p.hand.forEach((card, idx) => {
-            if (!card.isItem) return;
-            for (let s = 0; s < 3; s++) {
-                const stack = p.constructs[s];
+
+function enumerateCandidateMoves(state, pid) {
+    const p = state.players[pid];
+    const moves = [];
+
+    p.hand.forEach((card, hand_index) => {
+        if (card.isItem) {
+            for (let slot = 0; slot < 3; slot++) {
+                const stack = p.constructs[slot];
                 if (stack && stack.constructId !== card.constructId) continue;
                 if (stack && stack.cards.length >= 3) continue;
-                let score = 0;
-                score += stack ? 8 + stack.cards.length * 3 : 5;
-                if (card.type === 'predictor') score += 1; else score += 1;
-                const tempStack = stack ? { ...stack, cards: [...stack.cards, card] } : makeConstructStackFromCard(card);
-                if (card.type === 'predictor') {
-                    p.constructs.forEach(os => { if (os && os.type === 'outcome') score += calcObservedValidity(tempStack, os) * 10; });
-                } else {
-                    p.constructs.forEach(ps => { if (ps && ps.type === 'predictor') score += calcObservedValidity(ps, tempStack) * 10; });
-                }
-                score += (Math.random() * 2 - 1) * (ai.placeNoise || 0);
-                if (!best || score > best.score) best = { idx, slot: s, score };
+                moves.push({ type: 'place_card', hand_index, slot });
             }
-        });
-        if (!best) break;
-        const res = applyLocalMove(pid, { type: 'place_card', hand_index: best.idx, slot: best.slot });
-        if (!res.success) break;
-        progressed = true;
-    }
-    return progressed;
-}
-function aiUseSupport(pid) {
-    const p = localGame.players[pid];
-    const enemy = localGame.players[pid === 1 ? 2 : 1];
-    const ai = getAIProfile();
-    let acted = false;
-    let loop = 0;
-    while (loop++ < ai.supportLoopCap) {
-        let performed = false;
-
-        // Correction on strongest debuffed own monster
-        let cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'correction');
-        if (cIdx !== -1) {
-            let target = -1, delta = 0;
-            p.monsters.forEach((m, i) => {
-                if (!m || m.isMeta) return;
-                const d = (m.baseAtk ?? m.atk) - m.atk;
-                if (d > delta) { delta = d; target = i; }
-            });
-            if (target !== -1 && delta > 100) {
-                applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'me', target_type: 'monster', target_slot: target });
-                acted = performed = true;
+        } else {
+            if (card.id === 'sample_size' || card.id === 'job_relevance' || card.id === 'range_restrict' || card.id === 'correction' || card.id === 'item_analysis' || card.id === 'bootstrapping' || card.id === 'criterion_contam') {
+                ['me', 'opp'].forEach(target_owner => {
+                    const targetMonsters = state.players[target_owner === 'me' ? pid : (pid === 1 ? 2 : 1)].monsters;
+                    targetMonsters.forEach((m, target_slot) => {
+                        if (m) moves.push({ type: 'play_spell', hand_index, target_owner, target_type: 'monster', target_slot });
+                    });
+                });
+            }
+            if (card.id === 'missing_data' || card.id === 'construct_drift') {
+                ['me', 'opp'].forEach(target_owner => {
+                    const targetConstructs = state.players[target_owner === 'me' ? pid : (pid === 1 ? 2 : 1)].constructs;
+                    targetConstructs.forEach((c, target_slot) => {
+                        if (c) moves.push({ type: 'play_spell', hand_index, target_owner, target_type: 'construct', target_slot });
+                    });
+                });
             }
         }
-        if (performed) continue;
-
-        // Range Restriction on highest enemy ATK threat
-        cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'range_restrict');
-        if (cIdx !== -1) {
-            let target = -1, bestAtk = 0;
-            enemy.monsters.forEach((m, i) => { if (m && m.atk > bestAtk) { bestAtk = m.atk; target = i; } });
-            if (target !== -1 && bestAtk >= ai.rangeRestrictThreshold) {
-                applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'opp', target_type: 'monster', target_slot: target });
-                acted = performed = true;
-            }
-        }
-        if (performed) continue;
-
-        // Missing Data on lethal-ish enemy monster or stacked construct
-        cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'missing_data');
-        if (cIdx !== -1) {
-            let targetMonster = -1, threat = 0;
-            enemy.monsters.forEach((m, i) => { if (m && (m.atk + m.power * 400) > threat) { threat = m.atk + m.power * 400; targetMonster = i; } });
-            if (targetMonster !== -1 && threat >= ai.missingDataThreatThreshold) {
-                applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'opp', target_type: 'monster', target_slot: targetMonster });
-                acted = performed = true;
-            } else {
-                let targetConstruct = -1, stackSize = 0;
-                enemy.constructs.forEach((c, i) => { if (c && c.cards.length > stackSize) { stackSize = c.cards.length; targetConstruct = i; } });
-                if (targetConstruct !== -1 && stackSize >= ai.missingDataConstructStackMin) {
-                    applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'opp', target_type: 'construct', target_slot: targetConstruct });
-                    acted = performed = true;
-                }
-            }
-        }
-        if (performed) continue;
-
-        // Job Relevance on strongest monster that requires it
-        cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'job_relevance');
-        if (cIdx !== -1) {
-            let target = -1, score = 0;
-            p.monsters.forEach((m, i) => {
-                if (!m || m.hasJobRelevance || !m.requiresJobRelevance || m.summoningSick) return;
-                const s = m.atk * m.power;
-                if (s > score) { score = s; target = i; }
-            });
-            if (target !== -1 && score >= ai.jobRelevanceThreshold) {
-                applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'me', target_type: 'monster', target_slot: target });
-                acted = performed = true;
-            }
-        }
-        if (performed) continue;
-
-        // Sample Size on strongest available attacker until decent power
-        cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'sample_size');
-        if (cIdx !== -1) {
-            let target = -1, score = -1;
-            p.monsters.forEach((m, i) => {
-                if (!canMonsterAttack(m)) return;
-                const s = m.atk * (1 - m.power);
-                if (s > score) { score = s; target = i; }
-            });
-            if (target !== -1) {
-                const m = p.monsters[target];
-                if (m.power < ai.samplePowerTarget || m.n < ai.sampleNTarget) {
-                    applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'me', target_type: 'monster', target_slot: target });
-                    acted = performed = true;
-                }
-            }
-        }
-        if (performed) continue;
-
-        // Bootstrapping on strongest available attacker if power still low
-        cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'bootstrapping');
-        if (cIdx !== -1) {
-            let target = -1, score = -1;
-            p.monsters.forEach((m, i) => {
-                if (!canMonsterAttack(m)) return;
-                const s = m.atk * (1 - m.power);
-                if (s > score) { score = s; target = i; }
-            });
-            if (target !== -1) {
-                const m = p.monsters[target];
-                if (m.power < ai.samplePowerTarget) {
-                    applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'me', target_type: 'monster', target_slot: target });
-                    acted = performed = true;
-                }
-            }
-        }
-        if (performed) continue;
-
-        // Automated Item Generation on best own construct stack below cap
-        cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'item_analysis');
-        if (cIdx !== -1) {
-            let target = -1, best = -1;
-            p.constructs.forEach((cs, i) => {
-                if (!cs || cs.cards.length >= 3) return;
-                const score = cs.cards.length * 10 + cs.cards[0].avgR * 10;
-                if (score > best) { best = score; target = i; }
-            });
-            if (target !== -1) {
-                applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'me', target_type: 'construct', target_slot: target });
-                acted = performed = true;
-            }
-        }
-        if (performed) continue;
-
-        // Construct Drift on enemy's largest construct stack
-        cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'construct_drift');
-        if (cIdx !== -1) {
-            let target = -1, stackSize = 0;
-            enemy.constructs.forEach((cs, i) => {
-                if (cs && cs.cards.length > stackSize) { stackSize = cs.cards.length; target = i; }
-            });
-            if (target !== -1 && stackSize >= 2) {
-                applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'opp', target_type: 'construct', target_slot: target });
-                acted = performed = true;
-            }
-        }
-        if (performed) continue;
-
-        // Attrition on highest threat enemy monster
-        cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'criterion_contam');
-        if (cIdx !== -1) {
-            let target = -1, threat = 0;
-            enemy.monsters.forEach((m, i) => {
-                if (!m) return;
-                const t = m.atk + m.power * 500;
-                if (t > threat) { threat = t; target = i; }
-            });
-            if (target !== -1) {
-                applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'opp', target_type: 'monster', target_slot: target });
-                acted = performed = true;
-            }
-        }
-
-        if (!performed) break;
-    }
-    return acted;
-}
-function aiTrySummon(pid) {
-    const p = localGame.players[pid];
-    if (p.summoned) return false;
-    if (firstEmptySlot(p.monsters) === -1) return false;
-    const pair = findBestSummonPair(p);
-    if (!pair) return false;
-    return applyLocalMove(pid, { type: 'summon', pred_slot: pair.pred_slot, out_slot: pair.out_slot }).success;
-}
-function aiTryMeta(pid) {
-    const p = localGame.players[pid];
-    const ai = getAIProfile();
-    if (!localCanMeta(p)) return false;
-    const currentSum = p.monsters.reduce((s, m) => s + (m ? m.atk : 0), 0);
-    const estMeta = finalizeMetaMonster(buildMetaMonster(p.monsters.filter(Boolean)));
-    if (estMeta.atk >= Math.max(ai.metaMinAtk, currentSum * ai.metaUpgradeRatio) || p.monsters.filter(Boolean).length === 3) {
-        return applyLocalMove(pid, { type: 'meta' }).success;
-    }
-    return false;
-}
-function aiPickAttackTarget(pid, attackerSlot) {
-    const ai = getAIProfile();
-    const p = localGame.players[pid];
-    const enemy = localGame.players[pid === 1 ? 2 : 1];
-    const attacker = p.monsters[attackerSlot];
-    if (!attacker) return { target_type: 'lp', target_slot: null };
-    const enemyHasMonsters = enemy.monsters.some(Boolean);
-    if (!enemyHasMonsters) return { target_type: 'lp', target_slot: null };
-
-    const targetOptions = [];
-    enemy.monsters.forEach((d, i) => {
-        if (!d) return;
-        const sim = localAttackResolution(attacker, d);
-        let score = 0;
-        if (sim.outcome === 'win') score += ai.attackWinBonus + sim.damage + d.atk * ai.defenderValueWeight;
-        if (sim.outcome === 'tie') score += ai.attackTieBonus + d.atk * (ai.defenderValueWeight * 0.6);
-        if (sim.outcome === 'lose') score -= ai.attackLosePenalty + sim.damage + attacker.atk * ai.attackerSelfRiskWeight;
-        score *= attacker.power;
-        if (enemy.lp <= (sim.outcome === 'win' ? sim.damage : 0)) score += 5000;
-        targetOptions.push({ target_type: 'monster', target_slot: i, score });
     });
 
-    if (!targetOptions.length) return { target_type: 'lp', target_slot: null };
-    if (ai.randomTargetChance > 0 && Math.random() < ai.randomTargetChance) {
-        const randomOption = targetOptions[randInt(0, targetOptions.length - 1)];
-        return { target_type: randomOption.target_type, target_slot: randomOption.target_slot };
+    if (!p.summoned && firstEmptySlot(p.monsters) !== -1) {
+        for (let pred_slot = 0; pred_slot < 3; pred_slot++) {
+            for (let out_slot = 0; out_slot < 3; out_slot++) {
+                moves.push({ type: 'summon', pred_slot, out_slot });
+            }
+        }
     }
 
-    targetOptions.sort((a, b) => b.score - a.score);
-    return { target_type: targetOptions[0].target_type, target_slot: targetOptions[0].target_slot };
-}
-function aiBattlePhase(pid) {
-    const ai = getAIProfile();
-    const p = localGame.players[pid];
-    let guard = 0;
-    while (guard++ < ai.battleGuard && localGame.status === 'active' && localGame.currentPlayer === pid) {
-        aiUseSupport(pid);
-        let bestSlot = -1, bestScore = -Infinity;
-        p.monsters.forEach((m, i) => {
-            if (!canMonsterAttack(m)) return;
-            let score = m.atk * m.power + (m.hasJobRelevance ? 220 : 0);
-            if (m.attacksMade === 0) score += 30;
-            if (m.power >= 0.9) score += 40;
-            if (score > bestScore) { bestScore = score; bestSlot = i; }
+    if (localCanMeta(p)) moves.push({ type: 'meta' });
+
+    p.monsters.forEach((m, attacker_slot) => {
+        if (!canMonsterAttack(m)) return;
+        moves.push({ type: 'attack', attacker_slot, target_type: 'lp', target_slot: null });
+        const opp = state.players[pid === 1 ? 2 : 1];
+        opp.monsters.forEach((target, target_slot) => {
+            if (target) moves.push({ type: 'attack', attacker_slot, target_type: 'monster', target_slot });
         });
-        if (bestSlot === -1) break;
-        const target = aiPickAttackTarget(pid, bestSlot);
-        applyLocalMove(pid, { type: 'attack', attacker_slot: bestSlot, target_type: target.target_type, target_slot: target.target_slot });
-    }
+    });
+
+    moves.push({ type: 'end_turn' });
+    return moves;
 }
+
+function simulateLocalMove(state, pid, move) {
+    const snapshot = localGame;
+    localGame = deepClone(state);
+    const out = applyLocalMove(pid, move);
+    const result = { success: out.success, state: deepClone(localGame) };
+    localGame = snapshot;
+    return result;
+}
+
+function evaluateLocalState(state, pid) {
+    const me = state.players[pid];
+    const opp = state.players[pid === 1 ? 2 : 1];
+    const myAtk = me.monsters.reduce((sum, m) => sum + (m ? (m.atk * (m.power || 0.5)) : 0), 0);
+    const oppAtk = opp.monsters.reduce((sum, m) => sum + (m ? (m.atk * (m.power || 0.5)) : 0), 0);
+    const myConstructs = me.constructs.reduce((sum, c) => sum + (c ? c.cards.length : 0), 0);
+    const oppConstructs = opp.constructs.reduce((sum, c) => sum + (c ? c.cards.length : 0), 0);
+    let score = (me.lp - opp.lp) + (myAtk - oppAtk) * 0.9 + (myConstructs - oppConstructs) * 120 + (me.hand.length - opp.hand.length) * 45;
+    if (state.status === 'finished') score += state.winner === pid ? 20000 : -20000;
+    return score;
+}
+
+let localAIBrain = null;
+function getLocalAIBrain() {
+    if (localAIBrain) return localAIBrain;
+    localAIBrain = window.PsychometricDuelMctsAI.createController({
+        getDifficulty: () => session?.aiDifficulty || 'strong',
+        getState: () => localGame,
+        enumerateMoves: (state, pid) => enumerateCandidateMoves(state, pid)
+            .filter(move => simulateLocalMove(state, pid, move).success),
+        simulateMove: simulateLocalMove,
+        evaluateState: evaluateLocalState,
+        applyMove: (pid, move) => applyLocalMove(pid, move)
+    });
+    return localAIBrain;
+}
+
 async function runSinglePlayerAI() {
     if (!localGame || localGame.status !== 'active') return;
     if (localGame.currentPlayer !== 2) return;
-
-    const ai = getAIProfile();
-    await new Promise(r => setTimeout(r, ai.delayMs));
-
-    const pid = 2;
-    aiPlaceItems(pid);
-    aiTrySummon(pid);
-    aiUseSupport(pid);
-    aiTryMeta(pid);
-    aiUseSupport(pid);
-    if (session.aiDifficulty === 'strong' || session.aiDifficulty === 'expert') {
-        aiPlaceItems(pid);
-        aiTrySummon(pid);
-        aiUseSupport(pid);
-        aiTryMeta(pid);
-    }
-    aiBattlePhase(pid);
-
-    if (localGame.status === 'active' && localGame.currentPlayer === pid) {
-        applyLocalMove(pid, { type: 'end_turn' });
-    }
+    await getLocalAIBrain().playTurn(2);
 }
+
 async function localSubmitMove(move) {
     const out = applyLocalMove(1, move);
     if (!out.success) return { success: false, message: out.message };
@@ -2183,6 +1951,7 @@ function startSinglePlayer() {
     attackingMonsterSlot = null;
     mulliganSelection = new Set();
     uiPhase = 'idle';
+    localAIBrain = null;
     initLocalGame();
     gs = projectStateForPlayer(1);
     startGame();
