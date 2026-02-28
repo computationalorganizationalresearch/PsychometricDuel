@@ -705,6 +705,7 @@
             <p>Each attack requires a <strong>D20 significance roll</strong>. Your monster must achieve <strong>P &lt; .05</strong> to land the attack.</p>
             <p>Your success chance is your <strong>statistical power (1 − β)</strong>. The higher the power, the easier the D20 threshold.</p>
             <p>Example: if Power = 80%, you must roll <strong>16 or lower</strong> on a D20. If you roll above the threshold, the attack fails (a <span style="color:var(--outcome)">Type II Error</span>).</p>
+            <p><strong>Fairness gate:</strong> monsters with 3 stars or fewer cannot attack unless <span style="color:var(--spell)">Job Relevance</span> is equipped to them.</p>
 
             <h3>6. Sample Size (N) and Why Your Attack “Uses Data”</h3>
             <p>Monsters start with a small pilot sample (low N), which usually means low power.</p>
@@ -715,7 +716,7 @@
             <h3>7. Spells, Traps, and Timing Tips</h3>
             <p>
             • <span style="color:var(--spell)">Missing Data</span>: destroy any card on the field (monster or construct). Great for disrupting stacked constructs or removing a dangerous monster.<br>
-            • <span style="color:var(--spell)">Replication</span>: target your monster; grants an extra attack and preserves N for an additional strike window.<br>
+            • <span style="color:var(--spell)">Job Relevance</span>: equip to your monster. Monsters with 3 stars or fewer need it to attack.<br>
             • <span style="color:var(--trap)">Range Restriction</span>: target enemy monster; halves its ATK (attenuation in action).<br>
             • <span style="color:var(--gold)">Correction for Attenuation</span>: target your monster; sets ATK to r_true × 10,000 for one turn.
             </p>
@@ -893,12 +894,8 @@ function adverseImpactStarsFromBwd(rawBwd) {
     return 1;
 }
 
-function waitTurnsFromStars(stars) {
-    if (stars >= 4) return 0;
-    if (stars === 3) return 1;
-    if (stars === 2) return 2;
-    if (stars === 1) return 0;
-    return 0;
+function requiresJobRelevanceFromStars(stars) {
+    return stars <= 3;
 }
 
 function getPairAdverseImpact(predId, outId) {
@@ -907,7 +904,7 @@ function getPairAdverseImpact(predId, outId) {
     return {
         bwd,
         stars,
-        waitTurns: waitTurnsFromStars(stars),
+        requiresJobRelevance: requiresJobRelevanceFromStars(stars),
         starsText: '★'.repeat(stars) + '☆'.repeat(5 - stars)
     };
 }
@@ -950,7 +947,7 @@ const AI_DIFFICULTY_PROFILES = {
         description: 'Forgiving AI: simpler sequencing, fewer optimizations, weaker target selection.',
         maxPlacementLoops: 8, placeNoise: 10, supportLoopCap: 10,
         rangeRestrictThreshold: 1600, missingDataThreatThreshold: 2300, missingDataConstructStackMin: 3,
-        replicationThreshold: 1200, samplePowerTarget: 0.78, sampleNTarget: 80,
+        jobRelevanceThreshold: 1200, samplePowerTarget: 0.78, sampleNTarget: 80,
         metaMinAtk: 3200, metaUpgradeRatio: 1.05,
         attackWinBonus: 850, attackTieBonus: 120, attackLosePenalty: 520,
         attackerSelfRiskWeight: 0.35, defenderValueWeight: 0.22,
@@ -961,7 +958,7 @@ const AI_DIFFICULTY_PROFILES = {
         description: 'Solid AI: sensible stacking, support timing, and target priorities without perfect play.',
         maxPlacementLoops: 14, placeNoise: 5, supportLoopCap: 16,
         rangeRestrictThreshold: 1300, missingDataThreatThreshold: 1900, missingDataConstructStackMin: 2,
-        replicationThreshold: 950, samplePowerTarget: 0.86, sampleNTarget: 120,
+        jobRelevanceThreshold: 950, samplePowerTarget: 0.86, sampleNTarget: 120,
         metaMinAtk: 2800, metaUpgradeRatio: 0.85,
         attackWinBonus: 1000, attackTieBonus: 220, attackLosePenalty: 360,
         attackerSelfRiskWeight: 0.22, defenderValueWeight: 0.32,
@@ -972,7 +969,7 @@ const AI_DIFFICULTY_PROFILES = {
         description: 'Optimized AI: builds reliability stacks, powers attacks, and punishes threats.',
         maxPlacementLoops: 20, placeNoise: 1, supportLoopCap: 22,
         rangeRestrictThreshold: 1150, missingDataThreatThreshold: 1750, missingDataConstructStackMin: 2,
-        replicationThreshold: 850, samplePowerTarget: 0.90, sampleNTarget: 140,
+        jobRelevanceThreshold: 850, samplePowerTarget: 0.90, sampleNTarget: 140,
         metaMinAtk: 2550, metaUpgradeRatio: 0.75,
         attackWinBonus: 1080, attackTieBonus: 260, attackLosePenalty: 250,
         attackerSelfRiskWeight: 0.18, defenderValueWeight: 0.38,
@@ -983,7 +980,7 @@ const AI_DIFFICULTY_PROFILES = {
         description: 'Very strong AI: tighter sequencing, earlier power investment, and sharper battle heuristics.',
         maxPlacementLoops: 24, placeNoise: 0, supportLoopCap: 28,
         rangeRestrictThreshold: 1000, missingDataThreatThreshold: 1550, missingDataConstructStackMin: 2,
-        replicationThreshold: 700, samplePowerTarget: 0.93, sampleNTarget: 180,
+        jobRelevanceThreshold: 700, samplePowerTarget: 0.93, sampleNTarget: 180,
         metaMinAtk: 2400, metaUpgradeRatio: 0.68,
         attackWinBonus: 1150, attackTieBonus: 300, attackLosePenalty: 170,
         attackerSelfRiskWeight: 0.12, defenderValueWeight: 0.45,
@@ -1229,7 +1226,7 @@ const LOCAL_SPRITES = {
 
 const LOCAL_SPELL_CARDS = {
     sample_size: { id: 'sample_size', type: 'resource', icon: 'N+100', name: 'Sample Size', desc: 'Increase target friendly monster sample size (N), boosting power.' },
-    replication: { id: 'replication', type: 'spell', icon: '⟳', name: 'Replication', desc: 'Target your monster. Grants an extra attack and preserves N for one attack.' },
+    job_relevance: { id: 'job_relevance', type: 'spell', icon: '📌', name: 'Job Relevance', desc: 'Equip to your monster. Monsters with ★★★☆☆ or less need this to attack.' },
     missing_data: { id: 'missing_data', type: 'spell', icon: '∅', name: 'Missing Data', desc: 'Destroy any card on the field.' },
     range_restrict: { id: 'range_restrict', type: 'trap', icon: '↔', name: 'Range Restriction', desc: 'Target enemy monster. Halve ATK.' },
     correction: { id: 'correction', type: 'resource', icon: '↺', name: 'Correction for Attenuation', desc: 'Target your monster. Set ATK to r_true × 10,000 for this turn.' },
@@ -1362,7 +1359,7 @@ function buildStartingDeck() {
         cog_ability: 4, conscient: 4, struct_int: 4, work_sample: 4,
         job_perf: 4, turnover: 4, job_sat: 4, ocb: 4,
 
-        sample_size: 5, replication: 3, missing_data: 3, range_restrict: 4, correction: 3,
+        sample_size: 5, job_relevance: 3, missing_data: 3, range_restrict: 4, correction: 3,
 
         // New additions
         bootstrapping: 4, item_analysis: 3,
@@ -1419,8 +1416,7 @@ function buildMonster(predStack, outStack) {
         adverseImpact: ai.bwd,
         adverseStars: ai.stars,
         adverseStarsText: ai.starsText,
-        adverseWaitTurns: ai.waitTurns,
-        waitTurnsRemaining: 0,
+        requiresJobRelevance: ai.requiresJobRelevance,
         rObs: 0,
         baseAtk: 0,
         atk: 0,
@@ -1430,7 +1426,7 @@ function buildMonster(predStack, outStack) {
         attacksMade: 0,
         maxAttacks: 1,
         summoningSick: true,
-        hasReplication: false,
+        hasJobRelevance: false,
         rangeRestricted: false,
         isMeta: false
     };
@@ -1453,8 +1449,7 @@ function buildMetaMonster(monsters) {
         adverseImpact: 0,
         adverseStars: 5,
         adverseStarsText: '★★★★★',
-        adverseWaitTurns: 0,
-        waitTurnsRemaining: 0,
+        requiresJobRelevance: false,
         rObs: clamp(meanR * 1.25, 0.35, 0.9),
         baseAtk: clamp(Math.round(meanAtk * 1.45), 2400, 5200),
         atk: 0,
@@ -1464,7 +1459,7 @@ function buildMetaMonster(monsters) {
         attacksMade: 0,
         maxAttacks: 2,
         summoningSick: true,
-        hasReplication: false,
+        hasJobRelevance: false,
         rangeRestricted: false,
         isMeta: true
     };
@@ -1500,10 +1495,9 @@ function startTurnFor(pid) {
     drawCards(p, 1);
     p.monsters.forEach(m => {
         if (m) {
-            if ((m.waitTurnsRemaining ?? 0) > 0) m.waitTurnsRemaining -= 1;
             m.summoningSick = false;
             m.attacksMade = 0;
-            m.maxAttacks = m.isMeta ? 2 : (m.hasReplication ? 2 : 1);
+            m.maxAttacks = m.isMeta ? 2 : 1;
             refreshMonsterStats(m);
         }
     });
@@ -1634,12 +1628,7 @@ function projectStateForPlayer(pid) {
 }
 function consumeAttackSample(monster) {
     if (!monster) return;
-    const preserve = !!monster.hasReplication;
-    if (preserve) {
-        monster.hasReplication = false;
-    } else {
-        monster.n = monster.baseN ?? 20;
-    }
+    monster.n = monster.baseN ?? 20;
     if (!monster.isMeta) {
         refreshMonsterStats(monster);
     } else {
@@ -1660,7 +1649,9 @@ function localAttackResolution(attacker, defender) {
     return { damage: 0, outcome: 'tie', destroyAttacker: true, destroyDefender: true };
 }
 function canMonsterAttack(monster) {
-    return !!monster && !monster.summoningSick && (monster.waitTurnsRemaining ?? 0) <= 0 && monster.attacksMade < monster.maxAttacks;
+    if (!monster || monster.summoningSick || monster.attacksMade >= monster.maxAttacks) return false;
+    if (monster.requiresJobRelevance && !monster.hasJobRelevance) return false;
+    return true;
 }
 
 function applyLocalMove(pid, move) {
@@ -1739,11 +1730,12 @@ function applyLocalMove(pid, move) {
             else target.power = clamp(target.power + 0.01, 0.9, 0.99);
             logLocal(`P${pid} plays Sample Size on P${targetPid}'s monster (N = ${target.n}, PWR ${Math.floor(target.power * 100)}%).`, 'spell-log');
         }
-        else if (card.id === 'replication') {
-            if (move.target_type !== 'monster' || targetPlayer !== me) return { success: false, message: 'Replication must target your monster' };
-            target.hasReplication = true;
-            target.maxAttacks = Math.max(target.maxAttacks, 2);
-            logLocal(`P${pid} plays Replication. ${target.name} gains an extra attack and preserves N once.`, 'spell-log');
+        else if (card.id === 'job_relevance') {
+            if (move.target_type !== 'monster' || targetPlayer !== me) return { success: false, message: 'Job Relevance must target your monster' };
+            if (!target.requiresJobRelevance) return { success: false, message: 'This monster does not need Job Relevance to attack' };
+            if (target.hasJobRelevance) return { success: false, message: 'Job Relevance is already equipped to this monster' };
+            target.hasJobRelevance = true;
+            logLocal(`P${pid} equips Job Relevance to ${target.name}. It can now attack while it remains on the field.`, 'spell-log');
         }
         else if (card.id === 'missing_data') {
             if (move.target_type === 'construct') {
@@ -1809,7 +1801,7 @@ function applyLocalMove(pid, move) {
         const attacker = me.monsters[move.attacker_slot];
         if (!attacker) return { success: false, message: 'No attacker in that slot' };
         if (attacker.summoningSick) return { success: false, message: 'This monster cannot attack the turn it was summoned' };
-        if ((attacker.waitTurnsRemaining ?? 0) > 0) return { success: false, message: `This monster is waiting ${attacker.waitTurnsRemaining} more turn(s)` };
+        if (attacker.requiresJobRelevance && !attacker.hasJobRelevance) return { success: false, message: 'This monster needs Job Relevance equipped to attack' };
         if (attacker.attacksMade >= attacker.maxAttacks) return { success: false, message: 'This monster has no attacks left' };
 
         const threshold = clamp(Math.round(attacker.power * 20), 1, 20);
@@ -1818,7 +1810,6 @@ function applyLocalMove(pid, move) {
         move_result = { roll, threshold, hit, attack_data: { damage: 0, outcome: 'tie' } };
 
         attacker.attacksMade += 1;
-        attacker.waitTurnsRemaining = Math.max(attacker.waitTurnsRemaining ?? 0, attacker.adverseWaitTurns ?? 0);
 
         if (!hit) {
             logLocal(`P${pid}'s ${attacker.name} attacks and rolls ${roll} (needs ≤ ${threshold}). Type II error — attack misses.`, 'battle-log');
@@ -1974,16 +1965,16 @@ function aiUseSupport(pid) {
         }
         if (performed) continue;
 
-        // Replication on highest expected-value attacker
-        cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'replication');
+        // Job Relevance on strongest monster that requires it
+        cIdx = p.hand.findIndex(c => !c.isItem && c.id === 'job_relevance');
         if (cIdx !== -1) {
             let target = -1, score = 0;
             p.monsters.forEach((m, i) => {
-                if (!canMonsterAttack(m) || m.hasReplication) return;
+                if (!m || m.hasJobRelevance || !m.requiresJobRelevance || m.summoningSick) return;
                 const s = m.atk * m.power;
                 if (s > score) { score = s; target = i; }
             });
-            if (target !== -1 && score >= ai.replicationThreshold) {
+            if (target !== -1 && score >= ai.jobRelevanceThreshold) {
                 applyLocalMove(pid, { type: 'play_spell', hand_index: cIdx, target_owner: 'me', target_type: 'monster', target_slot: target });
                 acted = performed = true;
             }
@@ -2136,7 +2127,7 @@ function aiBattlePhase(pid) {
         let bestSlot = -1, bestScore = -Infinity;
         p.monsters.forEach((m, i) => {
             if (!canMonsterAttack(m)) return;
-            let score = m.atk * m.power + (m.hasReplication ? 220 : 0);
+            let score = m.atk * m.power + (m.hasJobRelevance ? 220 : 0);
             if (m.attacksMade === 0) score += 30;
             if (m.power >= 0.9) score += 40;
             if (score > bestScore) { bestScore = score; bestSlot = i; }
@@ -2459,9 +2450,9 @@ function renderMonsterSlot(slotIdx, owner) {
     } else if (uiPhase === 'spell_target_missing_data' && m) {
         slot.classList.add('spell-target');
         slot.onclick = () => executeMissingData(slotIdx, owner, 'monster');
-    } else if (uiPhase === 'spell_target_replication' && owner === 'player' && m) {
+    } else if (uiPhase === 'spell_target_job_relevance' && owner === 'player' && m) {
         slot.classList.add('spell-target');
-        slot.onclick = () => executeReplication(slotIdx);
+        slot.onclick = () => executeJobRelevance(slotIdx);
     } else {
         slot.onclick = null;
     }
@@ -2484,9 +2475,9 @@ function renderMonsterSlot(slotIdx, owner) {
     let pwrPercent = Math.floor(m.power * 100);
     let pwrColor = pwrPercent < 50 ? '#ff5555' : (pwrPercent < 80 ? '#ffcc00' : '#50fa7b');
     let atkCountHtml = m.maxAttacks > 1 ? `<div style="font-size:0.6cqmin; color:#aaa; text-align:center;">Atks: ${m.maxAttacks - m.attacksMade}</div>` : '';
-    let repHtml = m.hasReplication ? `<span style="color:var(--spell); font-size:0.6cqmin;">[REP]</span>` : '';
+    let repHtml = m.hasJobRelevance ? `<span style="color:var(--spell); font-size:0.6cqmin;">[JR]</span>` : '';
     const aiStars = m.adverseStarsText || '★★★★★';
-    const waitHtml = (m.waitTurnsRemaining ?? 0) > 0 ? `<div style="font-size:0.58cqmin; color:#ff5555; text-align:center;">WAIT ${m.waitTurnsRemaining} TURN(S)</div>` : '';
+    const relevanceHtml = (m.requiresJobRelevance && !m.hasJobRelevance) ? `<div style="font-size:0.58cqmin; color:#ff5555; text-align:center;">NEEDS JOB RELEVANCE</div>` : '';
 
     div.innerHTML = `
         <div class="monster-name">${m.name}</div>
@@ -2497,7 +2488,7 @@ function renderMonsterSlot(slotIdx, owner) {
         </div>
         <div class="monster-reliability" style="color:${m.isMeta ? 'var(--gold)' : pwrColor}">PWR: ${pwrPercent}% ${m.isMeta?'(META)':''}</div>
         <div style="font-size:0.55cqmin; color:var(--gold); text-align:center;">Fairness ${aiStars}</div>
-        ${waitHtml}
+        ${relevanceHtml}
         ${atkCountHtml}
     `;
     div.onmouseenter = (e) => showMonsterTooltip(e, m);
@@ -2778,8 +2769,8 @@ function showMonsterTooltip(e, m) {
     let pwrPercent = Math.floor(m.power * 100);
     let targetD20 = Math.max(1, Math.round(m.power * 20));
     const aiStars = m.adverseStarsText || '★★★★★';
-    const waitRule = m.adverseWaitTurns ?? 0;
-    tip.innerHTML = `<div style="color:var(--gold);">${m.name}</div><div style="color:#ff6644; font-size:1.5vmin;">ATK: ${m.atk}</div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="display:grid; grid-template-columns:1fr 1fr; gap:0.8vmin;"><div><div style="color:var(--gold);">Validity</div><div style="color:var(--gray);">r_true (ρ) = ${m.rTrue.toFixed(2)}</div><div style="color:var(--gray);">r_obs = ${m.rObs.toFixed(3)}</div></div><div><div style="color:var(--gold);">Fairness</div><div style="color:var(--gray);">Stars: ${aiStars}</div><div style="color:var(--gray);">Wait on attack: ${waitRule} turn(s)</div></div></div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="color:var(--resource);">Sample Size (N) = ${m.n}</div><div style="color:var(--green);">Power (1-β) = ${pwrPercent}%</div><div style="color:var(--white); font-size:0.8vmin;">Needs ≤ ${targetD20} on D20 to Hit</div>`;
+    const jrText = m.requiresJobRelevance ? (m.hasJobRelevance ? 'Equipped' : 'Required to attack') : 'Not required';
+    tip.innerHTML = `<div style="color:var(--gold);">${m.name}</div><div style="color:#ff6644; font-size:1.5vmin;">ATK: ${m.atk}</div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="display:grid; grid-template-columns:1fr 1fr; gap:0.8vmin;"><div><div style="color:var(--gold);">Validity</div><div style="color:var(--gray);">r_true (ρ) = ${m.rTrue.toFixed(2)}</div><div style="color:var(--gray);">r_obs = ${m.rObs.toFixed(3)}</div></div><div><div style="color:var(--gold);">Fairness</div><div style="color:var(--gray);">Stars: ${aiStars}</div><div style="color:var(--gray);">Job Relevance: ${jrText}</div></div></div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="color:var(--resource);">Sample Size (N) = ${m.n}</div><div style="color:var(--green);">Power (1-β) = ${pwrPercent}%</div><div style="color:var(--white); font-size:0.8vmin;">Needs ≤ ${targetD20} on D20 to Hit</div>`;
     positionTooltip(e, tip);
 }
 function positionTooltip(e, tip) {
@@ -2837,8 +2828,8 @@ function selectHandCard(idx) {
             uiPhase = 'spell_target_correct';
         } else if (card.id === 'sample_size') {
             uiPhase = 'spell_target_sample_size';
-        } else if (card.id === 'replication') {
-            uiPhase = 'spell_target_replication';
+        } else if (card.id === 'job_relevance') {
+            uiPhase = 'spell_target_job_relevance';
         } else if (card.id === 'bootstrapping') {
             uiPhase = 'spell_target_bootstrapping';
         } else if (card.id === 'item_analysis') {
@@ -2941,8 +2932,8 @@ async function executeSampleSize(slotIdx) {
     selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
 }
 
-async function executeReplication(slotIdx) {
-    if (uiPhase !== 'spell_target_replication') return;
+async function executeJobRelevance(slotIdx) {
+    if (uiPhase !== 'spell_target_job_relevance') return;
     await submitMove({ type: 'play_spell', hand_index: selectedHandCard, target_owner: 'me', target_type: 'monster', target_slot: slotIdx });
     triggerFlash('heal');
     selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
@@ -2980,7 +2971,7 @@ function onMonsterSlotClick(slotIdx) {
     if (isMulliganPending()) return;
     if (uiPhase === 'spell_target_correct') executeCorrection(slotIdx);
     if (uiPhase === 'spell_target_sample_size') executeSampleSize(slotIdx);
-    if (uiPhase === 'spell_target_replication') executeReplication(slotIdx);
+    if (uiPhase === 'spell_target_job_relevance') executeJobRelevance(slotIdx);
     if (uiPhase === 'spell_target_bootstrapping') executeBootstrapping(slotIdx);
 }
 
