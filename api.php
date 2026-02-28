@@ -162,6 +162,11 @@ function approxPowerFromROBSandN($rObs, $n) {
     return clamp(1 / (1 + exp(-$z)), 0.05, 0.99);
 }
 
+function getPowerValidityCoefficient($m) {
+    if (!$m) return 0;
+    return !empty($m['correctionApplied']) ? abs($m['rTrue'] ?? 0) : abs($m['rObs'] ?? 0);
+}
+
 function refreshMonsterStats(&$m) {
     if (!$m) return;
     if (!empty($m['isMeta'])) {
@@ -178,7 +183,7 @@ function refreshMonsterStats(&$m) {
     if (!empty($m['rangeRestricted'])) $m['atk'] = max(100, (int) floor($m['baseAtk'] / 2));
     else $m['atk'] = $m['baseAtk'];
 
-    $m['power'] = approxPowerFromROBSandN($m['rObs'], $m['n'] ?? MONSTER_BASE_N);
+    $m['power'] = approxPowerFromROBSandN(getPowerValidityCoefficient($m), $m['n'] ?? MONSTER_BASE_N);
 }
 
 function consumeAttackSample(&$monster) {
@@ -209,7 +214,7 @@ function buildDeck() {
     $counts = [
         'cog_ability'=>4,'conscient'=>4,'struct_int'=>4,'work_sample'=>4,
         'job_perf'=>4,'turnover'=>4,'job_sat'=>4,'ocb'=>4,
-        'sample_size'=>5,'job_relevance'=>3,'missing_data'=>3,'range_restrict'=>4,'correction'=>3,
+        'sample_size'=>5,'job_relevance'=>4,'imputation'=>3,'missing_data'=>3,'range_restrict'=>4,'correction'=>3,
         'bootstrapping'=>4,'item_analysis'=>3,
         'construct_drift'=>3,'criterion_contam'=>3,
     ];
@@ -217,6 +222,7 @@ function buildDeck() {
     $spellDefs = [
         'sample_size'=>['resource','Sample Size','N+100','Increase target friendly monster sample size (N), boosting power.'],
         'job_relevance'=>['spell','Job Relevance','📌','Equip to your monster. Monsters with ★★★☆☆ or less need this to attack.'],
+        'imputation'=>['spell','Imputation','🩹','Equip to your monster. If Missing Data targets it, Imputation is destroyed instead.'],
         'missing_data'=>['spell','Missing Data','∅','Destroy any card on the field.'],
         'range_restrict'=>['trap','Range Restriction','↔','Target enemy monster. Halve ATK.'],
         'correction'=>['resource','Correction for Attenuation','↺','Target your monster. Set ATK to r_true × 10,000 for this turn.'],
@@ -487,6 +493,8 @@ function moveSummon(&$state, &$me, $pNum, $move) {
         'maxAttacks' => 1,
         'summoningSick' => true,
         'hasJobRelevance' => false,
+        'hasImputation' => false,
+        'correctionApplied' => false,
         'rangeRestricted' => false,
         'isMeta' => false
     ];
@@ -527,13 +535,22 @@ function movePlaySpell(&$state, &$me, &$opp, $pNum, $move) {
         if (empty($me['monsters'][$targetSlot]['requiresJobRelevance'])) return ['ok'=>false,'msg'=>'This monster does not need Job Relevance to attack'];
         if (!empty($me['monsters'][$targetSlot]['hasJobRelevance'])) return ['ok'=>false,'msg'=>'Job Relevance is already equipped to this monster'];
         $me['monsters'][$targetSlot]['hasJobRelevance'] = true;
+    } elseif ($id === 'imputation') {
+        if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Imputation must target your monster'];
+        if (!empty($me['monsters'][$targetSlot]['hasImputation'])) return ['ok'=>false,'msg'=>'Imputation is already equipped to this monster'];
+        $me['monsters'][$targetSlot]['hasImputation'] = true;
     } elseif ($id === 'missing_data') {
         if ($targetType === 'construct') {
             if ($targetOwner === 'me') $me['constructs'][$targetSlot] = null;
             else $opp['constructs'][$targetSlot] = null;
         } else {
-            if ($targetOwner === 'me') $me['monsters'][$targetSlot] = null;
-            else $opp['monsters'][$targetSlot] = null;
+            if ($targetOwner === 'me') {
+                if (!empty($me['monsters'][$targetSlot]['hasImputation'])) $me['monsters'][$targetSlot]['hasImputation'] = false;
+                else $me['monsters'][$targetSlot] = null;
+            } else {
+                if (!empty($opp['monsters'][$targetSlot]['hasImputation'])) $opp['monsters'][$targetSlot]['hasImputation'] = false;
+                else $opp['monsters'][$targetSlot] = null;
+            }
         }
     } elseif ($id === 'range_restrict') {
         if ($targetType !== 'monster' || $targetOwner !== 'opp') return ['ok'=>false,'msg'=>'Range Restriction must target enemy monster'];
@@ -541,7 +558,9 @@ function movePlaySpell(&$state, &$me, &$opp, $pNum, $move) {
         refreshMonsterStats($opp['monsters'][$targetSlot]);
     } elseif ($id === 'correction') {
         if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Correction for Attenuation must target your monster'];
+        $me['monsters'][$targetSlot]['correctionApplied'] = true;
         $me['monsters'][$targetSlot]['rangeRestricted'] = false;
+        refreshMonsterStats($me['monsters'][$targetSlot]);
         $me['monsters'][$targetSlot]['atk'] = (int) round(abs($me['monsters'][$targetSlot]['rTrue'] ?? 0) * 10000);
     } elseif ($id === 'bootstrapping') {
         if ($targetType !== 'monster' || $targetOwner !== 'me') return ['ok'=>false,'msg'=>'Bootstrapping must target your monster'];
@@ -666,6 +685,8 @@ function moveMeta(&$state, &$me, $pNum) {
         'maxAttacks' => 2,
         'summoningSick' => true,
         'hasJobRelevance' => false,
+        'hasImputation' => false,
+        'correctionApplied' => false,
         'rangeRestricted' => false,
         'isMeta' => true
     ];

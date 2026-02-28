@@ -1188,6 +1188,7 @@ const LOCAL_SPRITES = {
 const LOCAL_SPELL_CARDS = {
     sample_size: { id: 'sample_size', type: 'resource', icon: 'N+100', name: 'Sample Size', desc: 'Increase target friendly monster sample size (N), boosting power.' },
     job_relevance: { id: 'job_relevance', type: 'spell', icon: '📌', name: 'Job Relevance', desc: 'Equip to your monster. Monsters with ★★★☆☆ or less need this to attack.' },
+    imputation: { id: 'imputation', type: 'spell', icon: '🩹', name: 'Imputation', desc: 'Equip to your monster. If Missing Data targets it, Imputation is destroyed instead.' },
     missing_data: { id: 'missing_data', type: 'spell', icon: '∅', name: 'Missing Data', desc: 'Destroy any card on the field.' },
     range_restrict: { id: 'range_restrict', type: 'trap', icon: '↔', name: 'Range Restriction', desc: 'Target enemy monster. Halve ATK.' },
     correction: { id: 'correction', type: 'resource', icon: '↺', name: 'Correction for Attenuation', desc: 'Target your monster. Set ATK to r_true × 10,000 for this turn.' },
@@ -1281,6 +1282,10 @@ function approxPowerFromROBSandN(rObs, n) {
     const z = (effect - 1.35) * 1.15;
     return clamp(1 / (1 + Math.exp(-z)), 0.05, 0.99);
 }
+function getPowerValidityCoefficient(m) {
+    if (!m) return 0;
+    return m.correctionApplied ? Math.abs(m.rTrue ?? 0) : Math.abs(m.rObs ?? 0);
+}
 function refreshMonsterStats(m) {
     if (!m) return;
     if (m.isMeta) {
@@ -1291,7 +1296,7 @@ function refreshMonsterStats(m) {
     m.baseAtk = Math.round(Math.abs(m.rObs) * 10000);
     if (!m.rangeRestricted) m.atk = m.baseAtk;
     else m.atk = Math.max(100, Math.floor(m.baseAtk / 2));
-    m.power = approxPowerFromROBSandN(m.rObs, m.n);
+    m.power = approxPowerFromROBSandN(getPowerValidityCoefficient(m), m.n);
 }
 
 function makeItemCard(constructId, indicatorIndex = null) {
@@ -1320,7 +1325,7 @@ function buildStartingDeck() {
         cog_ability: 4, conscient: 4, struct_int: 4, work_sample: 4,
         job_perf: 4, turnover: 4, job_sat: 4, ocb: 4,
 
-        sample_size: 5, job_relevance: 3, missing_data: 3, range_restrict: 4, correction: 3,
+        sample_size: 5, job_relevance: 4, imputation: 3, missing_data: 3, range_restrict: 4, correction: 3,
 
         // New additions
         bootstrapping: 4, item_analysis: 3,
@@ -1388,6 +1393,8 @@ function buildMonster(predStack, outStack) {
         maxAttacks: 1,
         summoningSick: true,
         hasJobRelevance: false,
+        hasImputation: false,
+        correctionApplied: false,
         rangeRestricted: false,
         isMeta: false
     };
@@ -1421,6 +1428,8 @@ function buildMetaMonster(monsters) {
         maxAttacks: 2,
         summoningSick: true,
         hasJobRelevance: false,
+        hasImputation: false,
+        correctionApplied: false,
         rangeRestricted: false,
         isMeta: true
     };
@@ -1698,6 +1707,12 @@ function applyLocalMove(pid, move) {
             target.hasJobRelevance = true;
             logLocal(`P${pid} equips Job Relevance to ${target.name}. It can now attack while it remains on the field.`, 'spell-log');
         }
+        else if (card.id === 'imputation') {
+            if (move.target_type !== 'monster' || targetPlayer !== me) return { success: false, message: 'Imputation must target your monster' };
+            if (target.hasImputation) return { success: false, message: 'Imputation is already equipped to this monster' };
+            target.hasImputation = true;
+            logLocal(`P${pid} equips Imputation to ${target.name}. Missing Data will remove Imputation first.`, 'spell-log');
+        }
         else if (card.id === 'missing_data') {
             if (move.target_type === 'construct') {
                 const destroyed = targetArr[move.target_slot];
@@ -1705,8 +1720,13 @@ function applyLocalMove(pid, move) {
                 logLocal(`P${pid} plays Missing Data and destroys P${targetPid}'s ${destroyed.cards[0].construct} construct stack.`, 'spell-log');
             } else {
                 const destroyed = targetArr[move.target_slot];
-                targetArr[move.target_slot] = null;
-                logLocal(`P${pid} plays Missing Data and destroys P${targetPid}'s monster ${destroyed.name}.`, 'spell-log');
+                if (destroyed.hasImputation) {
+                    destroyed.hasImputation = false;
+                    logLocal(`P${pid} plays Missing Data on P${targetPid}'s ${destroyed.name}, but Imputation is destroyed instead.`, 'spell-log');
+                } else {
+                    targetArr[move.target_slot] = null;
+                    logLocal(`P${pid} plays Missing Data and destroys P${targetPid}'s monster ${destroyed.name}.`, 'spell-log');
+                }
             }
         }
         else if (card.id === 'range_restrict') {
@@ -1717,9 +1737,11 @@ function applyLocalMove(pid, move) {
         }
         else if (card.id === 'correction') {
             if (move.target_type !== 'monster' || targetPlayer !== me) return { success: false, message: 'Correction for Attenuation must target your monster' };
+            target.correctionApplied = true;
             target.rangeRestricted = false;
+            refreshMonsterStats(target);
             target.atk = Math.round(Math.abs(target.rTrue ?? 0) * 10000);
-            logLocal(`P${pid} applies Correction for Attenuation to ${target.name}. ATK becomes ${target.atk} for this turn.`, 'spell-log');
+            logLocal(`P${pid} applies Correction for Attenuation to ${target.name}. ATK ${target.atk}, PWR ${Math.floor(target.power * 100)}%.`, 'spell-log');
         }
         else if (card.id === 'bootstrapping') {
             if (move.target_type !== 'monster' || targetPlayer !== me) return { success: false, message: 'Bootstrapping must target your monster' };
@@ -1846,7 +1868,7 @@ function enumerateCandidateMoves(state, pid) {
                 moves.push({ type: 'place_card', hand_index, slot });
             }
         } else {
-            if (card.id === 'sample_size' || card.id === 'job_relevance' || card.id === 'range_restrict' || card.id === 'correction' || card.id === 'item_analysis' || card.id === 'bootstrapping' || card.id === 'criterion_contam') {
+            if (card.id === 'sample_size' || card.id === 'job_relevance' || card.id === 'imputation' || card.id === 'range_restrict' || card.id === 'correction' || card.id === 'item_analysis' || card.id === 'bootstrapping' || card.id === 'criterion_contam') {
                 ['me', 'opp'].forEach(target_owner => {
                     const targetMonsters = state.players[target_owner === 'me' ? pid : (pid === 1 ? 2 : 1)].monsters;
                     targetMonsters.forEach((m, target_slot) => {
@@ -2222,6 +2244,9 @@ function renderMonsterSlot(slotIdx, owner) {
     } else if (uiPhase === 'spell_target_job_relevance' && owner === 'player' && m) {
         slot.classList.add('spell-target');
         slot.onclick = () => executeJobRelevance(slotIdx);
+    } else if (uiPhase === 'spell_target_imputation' && owner === 'player' && m) {
+        slot.classList.add('spell-target');
+        slot.onclick = () => executeImputation(slotIdx);
     } else {
         slot.onclick = null;
     }
@@ -2244,7 +2269,9 @@ function renderMonsterSlot(slotIdx, owner) {
     let pwrPercent = Math.floor(m.power * 100);
     let pwrColor = pwrPercent < 50 ? '#ff5555' : (pwrPercent < 80 ? '#ffcc00' : '#50fa7b');
     let atkCountHtml = m.maxAttacks > 1 ? `<div style="font-size:0.6cqmin; color:#aaa; text-align:center;">Atks: ${m.maxAttacks - m.attacksMade}</div>` : '';
-    let repHtml = m.hasJobRelevance ? `<span style="color:var(--spell); font-size:0.6cqmin;">[JR]</span>` : '';
+    let repHtml = '';
+    if (m.hasJobRelevance) repHtml += `<span style="color:var(--spell); font-size:0.6cqmin;">[JR]</span>`;
+    if (m.hasImputation) repHtml += ` <span style="color:var(--predictor-light); font-size:0.6cqmin;">[IMP]</span>`;
     const aiStars = m.adverseStarsText || '★★★★★';
     const relevanceHtml = (m.requiresJobRelevance && !m.hasJobRelevance) ? `<div style="font-size:0.58cqmin; color:#ff5555; text-align:center;">NEEDS JOB RELEVANCE</div>` : '';
 
@@ -2539,7 +2566,9 @@ function showMonsterTooltip(e, m) {
     let targetD20 = Math.max(1, Math.round(m.power * 20));
     const aiStars = m.adverseStarsText || '★★★★★';
     const jrText = m.requiresJobRelevance ? (m.hasJobRelevance ? 'Equipped' : 'Required to attack') : 'Not required';
-    tip.innerHTML = `<div style="color:var(--gold);">${m.name}</div><div style="color:#ff6644; font-size:1.5vmin;">ATK: ${m.atk}</div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="display:grid; grid-template-columns:1fr 1fr; gap:0.8vmin;"><div><div style="color:var(--gold);">Validity</div><div style="color:var(--gray);">r_true (ρ) = ${m.rTrue.toFixed(2)}</div><div style="color:var(--gray);">r_obs = ${m.rObs.toFixed(3)}</div></div><div><div style="color:var(--gold);">Fairness</div><div style="color:var(--gray);">Stars: ${aiStars}</div><div style="color:var(--gray);">Job Relevance: ${jrText}</div></div></div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="color:var(--resource);">Sample Size (N) = ${m.n}</div><div style="color:var(--green);">Power (1-β) = ${pwrPercent}%</div><div style="color:var(--white); font-size:0.8vmin;">Needs ≤ ${targetD20} on D20 to Hit</div>`;
+    const correctionText = m.correctionApplied ? 'Applied (power uses corrected validity)' : 'Not applied';
+    const imputationText = m.hasImputation ? 'Equipped' : 'Not equipped';
+    tip.innerHTML = `<div style="color:var(--gold);">${m.name}</div><div style="color:#ff6644; font-size:1.5vmin;">ATK: ${m.atk}</div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="display:grid; grid-template-columns:1fr 1fr; gap:0.8vmin;"><div><div style="color:var(--gold);">Validity</div><div style="color:var(--gray);">r_true (ρ) = ${m.rTrue.toFixed(2)}</div><div style="color:var(--gray);">r_obs = ${m.rObs.toFixed(3)}</div><div style="color:var(--gray);">Correction: ${correctionText}</div></div><div><div style="color:var(--gold);">Fairness</div><div style="color:var(--gray);">Stars: ${aiStars}</div><div style="color:var(--gray);">Job Relevance: ${jrText}</div><div style="color:var(--gray);">Imputation: ${imputationText}</div></div></div><hr style="border:0.1vmin solid #555; margin:0.5vmin 0;"><div style="color:var(--resource);">Sample Size (N) = ${m.n}</div><div style="color:var(--green);">Power (1-β) = ${pwrPercent}%</div><div style="color:var(--white); font-size:0.8vmin;">Needs ≤ ${targetD20} on D20 to Hit</div>`;
     positionTooltip(e, tip);
 }
 function positionTooltip(e, tip) {
@@ -2599,6 +2628,8 @@ function selectHandCard(idx) {
             uiPhase = 'spell_target_sample_size';
         } else if (card.id === 'job_relevance') {
             uiPhase = 'spell_target_job_relevance';
+        } else if (card.id === 'imputation') {
+            uiPhase = 'spell_target_imputation';
         } else if (card.id === 'bootstrapping') {
             uiPhase = 'spell_target_bootstrapping';
         } else if (card.id === 'item_analysis') {
@@ -2708,6 +2739,13 @@ async function executeJobRelevance(slotIdx) {
     selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
 }
 
+async function executeImputation(slotIdx) {
+    if (uiPhase !== 'spell_target_imputation') return;
+    await submitMove({ type: 'play_spell', hand_index: selectedHandCard, target_owner: 'me', target_type: 'monster', target_slot: slotIdx });
+    triggerFlash('heal');
+    selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
+}
+
 async function executeBootstrapping(slotIdx) {
     if (uiPhase !== 'spell_target_bootstrapping') return;
     await submitMove({ type: 'play_spell', hand_index: selectedHandCard, target_owner: 'me', target_type: 'monster', target_slot: slotIdx });
@@ -2741,6 +2779,7 @@ function onMonsterSlotClick(slotIdx) {
     if (uiPhase === 'spell_target_correct') executeCorrection(slotIdx);
     if (uiPhase === 'spell_target_sample_size') executeSampleSize(slotIdx);
     if (uiPhase === 'spell_target_job_relevance') executeJobRelevance(slotIdx);
+    if (uiPhase === 'spell_target_imputation') executeImputation(slotIdx);
     if (uiPhase === 'spell_target_bootstrapping') executeBootstrapping(slotIdx);
 }
 
