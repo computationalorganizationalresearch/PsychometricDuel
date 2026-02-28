@@ -110,10 +110,11 @@ function getTrueValidity() {
 
 function getAdverseImpactBwd() {
     return [
-        'cog_ability' => ['job_perf'=>0.79,'turnover'=>0.73,'job_sat'=>0.70,'ocb'=>0.68],
-        'conscient'   => ['job_perf'=>-0.07,'turnover'=>-0.03,'job_sat'=>0.00,'ocb'=>0.02],
-        'struct_int'  => ['job_perf'=>0.23,'turnover'=>0.27,'job_sat'=>0.24,'ocb'=>0.25],
-        'work_sample' => ['job_perf'=>0.67,'turnover'=>0.62,'job_sat'=>0.60,'ocb'=>0.58]
+        // Combo-specific gameplay tuning: Job Performance pairings are intentionally a bit harsher.
+        'cog_ability' => ['job_perf'=>0.95,'turnover'=>0.60,'job_sat'=>0.58,'ocb'=>0.55],
+        'conscient'   => ['job_perf'=>0.20,'turnover'=>0.05,'job_sat'=>0.05,'ocb'=>0.05],
+        'struct_int'  => ['job_perf'=>0.35,'turnover'=>0.22,'job_sat'=>0.22,'ocb'=>0.22],
+        'work_sample' => ['job_perf'=>0.55,'turnover'=>0.40,'job_sat'=>0.40,'ocb'=>0.40]
     ];
 }
 
