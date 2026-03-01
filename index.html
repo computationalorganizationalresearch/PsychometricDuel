@@ -2996,6 +2996,7 @@ function selectHandCard(idx) {
     if (isMulliganPending()) return;
     if ((gs.pending_discard_count || 0) > 0) {
         if (needsDiscardPromptAck()) {
+        if (!discardPromptAcknowledged) {
             syncDiscardWarningOverlay();
             return;
         }
