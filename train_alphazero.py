@@ -34,6 +34,24 @@ import pythonport
 LOGGER = logging.getLogger("alphazero")
 
 
+def _json_default(value: object):
+    if isinstance(value, Path):
+        return str(value)
+    raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
+
+
+def make_json_safe(value: object) -> object:
+    if isinstance(value, dict):
+        return {str(k): make_json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [make_json_safe(v) for v in value]
+    if isinstance(value, tuple):
+        return [make_json_safe(v) for v in value]
+    if isinstance(value, Path):
+        return str(value)
+    return value
+
+
 MAX_HAND_SIZE = pythonport.MAX_HAND_SIZE
 
 
@@ -519,8 +537,9 @@ def save_checkpoint(path: Path, model: AlphaZeroNet, optimizer: torch.optim.Opti
 
 def write_metadata(path: Path, metadata: Dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    safe_metadata = make_json_safe(metadata)
     with path.open("w", encoding="utf-8") as f:
-        json.dump(metadata, f, indent=2, sort_keys=True)
+        json.dump(safe_metadata, f, indent=2, sort_keys=True, default=_json_default)
 
 
 def parse_args() -> argparse.Namespace:
