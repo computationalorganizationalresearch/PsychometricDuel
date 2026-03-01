@@ -100,8 +100,32 @@
         const EARLY_STOP_VISIT_SHARE = 0.68;
         const EARLY_STOP_MIN_VISITS = 110;
 
+        const MAX_MOVE_CACHE = 900;
+        const MAX_EVAL_CACHE = 1800;
+        const MAX_TRANSITION_CACHE = 1800;
+        const MAX_TT_ENTRIES = 2200;
+
         function clamp(value, min, max) {
             return Math.max(min, Math.min(max, value));
+        }
+
+        function setWithLimit(map, key, value, maxSize) {
+            if (map.has(key)) {
+                map.set(key, value);
+                return;
+            }
+            if (map.size >= maxSize) {
+                const oldest = map.keys().next();
+                if (!oldest.done) map.delete(oldest.value);
+            }
+            map.set(key, value);
+        }
+
+        function resetSearchCaches() {
+            moveCache.clear();
+            evalCache.clear();
+            transitionCache.clear();
+            transpositionTable.clear();
         }
 
         function cachedStateKey(state, pid) {
@@ -143,7 +167,7 @@
             const key = `${cachedStateKey(state, pid)}|${moveKey(move)}`;
             if (transitionCache.has(key)) return transitionCache.get(key);
             const result = adapter.simulateMove(state, pid, move);
-            transitionCache.set(key, result);
+            setWithLimit(transitionCache, key, result, MAX_TRANSITION_CACHE);
             return result;
         }
 
@@ -156,7 +180,7 @@
                     const hasEnd = moves.some(move => move && move.type === 'end_turn');
                     if (!hasEnd) moves.push({ type: 'end_turn' });
                 }
-                moveCache.set(key, moves);
+                setWithLimit(moveCache, key, moves, MAX_MOVE_CACHE);
             }
             return moveCache.get(key);
         }
@@ -164,7 +188,7 @@
         function evaluateWithCache(state, rootPid) {
             const key = `${cachedStateKey(state, rootPid)}|eval`;
             if (!evalCache.has(key)) {
-                evalCache.set(key, adapter.evaluateState(state, rootPid));
+                setWithLimit(evalCache, key, adapter.evaluateState(state, rootPid), MAX_EVAL_CACHE);
             }
             return evalCache.get(key);
         }
@@ -414,6 +438,7 @@
                     existing.visits += 1;
                     existing.valueSum += signed;
                 } else {
+                    setWithLimit(transpositionTable, node.stateHash, { visits: 1, valueSum: signed }, MAX_TT_ENTRIES);
                     transpositionTable.set(node.stateHash, { visits: 1, valueSum: signed });
                 }
             }
@@ -457,7 +482,47 @@
             return best;
         }
 
+        function shouldEarlyStop(root, elapsedMs, thinkMs) {
+            if (!root.children || root.children.length < 2) return false;
+            if (elapsedMs < thinkMs * 0.45 || root.visits < EARLY_STOP_MIN_VISITS) return false;
+
+            let first = null;
+            let second = null;
+            for (let i = 0; i < root.children.length; i += 1) {
+                const child = root.children[i];
+                if (!first || child.visits > first.visits) {
+                    second = first;
+                    first = child;
+                } else if (!second || child.visits > second.visits) {
+                    second = child;
+                }
+            }
+            if (!first || !second) return false;
+
+            const share = first.visits / Math.max(1, root.visits);
+            const qGap = first.qValue() - second.qValue();
+            return share >= EARLY_STOP_VISIT_SHARE && qGap > 45;
+        }
+
+        function finalMoveSelection(children) {
+            if (!children.length) return null;
+            let best = children[0];
+            let bestScore = -Infinity;
+
+            for (let i = 0; i < children.length; i += 1) {
+                const child = children[i];
+                const score = (child.visits * 1.1) + (child.qValue() * 0.9);
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = child;
+                }
+            }
+            return best;
+        }
+
         function chooseMoveWithMcts(state, pid, profile) {
+            resetSearchCaches();
+
             const root = new TreeNode({
                 state,
                 pid,
