@@ -566,15 +566,10 @@ def main() -> None:
     optimizer = torch.optim.Adam(net.parameters(), lr=args.learning_rate)
     replay: Deque[Sample] = deque(maxlen=args.replay_size)
 
-    serializable_hparams = {
-        k: (str(v) if isinstance(v, Path) else v)
-        for k, v in vars(args).items()
-    }
-
     metadata = {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "seed": args.seed,
-        "hyperparameters": serializable_hparams,
+        "hyperparameters": vars(args),
         "history": [],
         "expectations": {
             "primary_target": "Candidate model reaches >=55% win rate in gating matches before promotion.",
