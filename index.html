@@ -655,6 +655,12 @@
 
         <div id="single-menu" class="lobby-section" style="display:none;">
             <div class="menu-subtitle">SINGLE PLAYER MODE SELECTOR</div>
+            <div class="menu-subtitle" style="color:var(--spell);">CHOOSE AI ENGINE</div>
+            <div class="difficulty-grid" id="engine-grid">
+                <button class="difficulty-btn" data-engine="mcts" onclick="selectAIEngine('mcts')">MCTS</button>
+                <button class="difficulty-btn" data-engine="alphazero" onclick="selectAIEngine('alphazero')">ALPHAZERO</button>
+            </div>
+            <div class="lobby-status" id="ai-engine-desc"></div>
             <div class="menu-subtitle" style="color:var(--predictor-light);">CHOOSE AI DIFFICULTY</div>
             <div class="difficulty-grid" id="difficulty-grid">
                 <button class="difficulty-btn" data-difficulty="rookie" onclick="selectAIDifficulty('rookie')">ROOKIE</button>
@@ -889,7 +895,9 @@
 
 <div class="tooltip" id="tooltip"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
 <script src="ai/singlePlayerMcts.js"></script>
+<script src="ai/singlePlayerAlphaZero.js"></script>
 <script>
 // ==================== CONFIG ====================
 const API_URL = 'api.php'; // Change to your API endpoint
@@ -989,6 +997,10 @@ const AI_DIFFICULTY_PROFILES = window.PsychometricDuelMctsAI?.PROFILES || {
     strong: { label: 'Strong', description: 'Optimized AI', thinkMs: 1800 },
     expert: { label: 'Expert', description: 'Very strong AI', thinkMs: 3600 }
 };
+const AI_ENGINE_PROFILES = {
+    mcts: { label: 'MCTS', description: 'Tree-search engine tuned for tactical play.' },
+    alphazero: { label: 'AlphaZero ONNX', description: 'Neural policy/value engine with ONNX inference.' }
+};
 function getAIProfile() {
     const key = session?.aiDifficulty || 'strong';
     return AI_DIFFICULTY_PROFILES[key] || AI_DIFFICULTY_PROFILES.strong;
@@ -1002,7 +1014,27 @@ function showMenu(view) {
     if (main) main.style.display = (view === 'main') ? 'flex' : 'none';
     if (online) online.style.display = (view === 'online') ? 'flex' : 'none';
     if (single) single.style.display = (view === 'single') ? 'flex' : 'none';
-    if (view === 'single') updateAIDifficultyUI();
+    if (view === 'single') {
+        updateAIEngineUI();
+        updateAIDifficultyUI();
+    }
+}
+function updateAIEngineUI() {
+    const key = session?.aiEngine || 'mcts';
+    document.querySelectorAll('#engine-grid .difficulty-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.engine === key);
+    });
+    const desc = document.getElementById('ai-engine-desc');
+    if (desc) {
+        const p = AI_ENGINE_PROFILES[key] || AI_ENGINE_PROFILES.mcts;
+        desc.innerHTML = `<span style="color:var(--gold)">${p.label}</span> — ${p.description}`;
+    }
+}
+function selectAIEngine(key) {
+    if (!AI_ENGINE_PROFILES[key]) return;
+    session.aiEngine = key;
+    updateAIEngineUI();
+    localAIBrain = null;
 }
 function updateAIDifficultyUI() {
     const key = session?.aiDifficulty || 'strong';
@@ -1019,6 +1051,7 @@ function selectAIDifficulty(key) {
     if (!AI_DIFFICULTY_PROFILES[key]) return;
     session.aiDifficulty = key;
     updateAIDifficultyUI();
+    localAIBrain = null;
 }
 
 function showCardGallery() {
@@ -2235,7 +2268,7 @@ function evaluateLocalState(state, pid) {
 let localAIBrain = null;
 function getLocalAIBrain() {
     if (localAIBrain) return localAIBrain;
-    localAIBrain = window.PsychometricDuelMctsAI.createController({
+    const adapter = {
         getDifficulty: () => session?.aiDifficulty || 'strong',
         getState: () => localGame,
         enumerateMoves: (state, pid) => enumerateCandidateMoves(state, pid)
@@ -2243,7 +2276,13 @@ function getLocalAIBrain() {
         simulateMove: simulateLocalMove,
         evaluateState: evaluateLocalState,
         applyMove: (pid, move) => applyLocalMove(pid, move)
-    });
+    };
+    const engine = session?.aiEngine || 'mcts';
+    if (engine === 'alphazero' && window.PsychometricDuelAlphaZeroAI?.createController) {
+        localAIBrain = window.PsychometricDuelAlphaZeroAI.createController(adapter);
+    } else {
+        localAIBrain = window.PsychometricDuelMctsAI.createController(adapter);
+    }
     return localAIBrain;
 }
 
@@ -2281,6 +2320,40 @@ function startSinglePlayer() {
     startGame();
 }
 
+
+async function runAlphaZeroCompatibilityCheck(gameCount = 2) {
+    const previousEngine = session.aiEngine;
+    const previousMode = session.gameMode;
+    session.aiEngine = 'alphazero';
+    const results = [];
+
+    for (let g = 0; g < gameCount; g += 1) {
+        initLocalGame();
+        localAIBrain = null;
+        let guard = 0;
+        while (localGame.status === 'active' && guard < 400) {
+            guard += 1;
+            const pid = localGame.currentPlayer;
+            if (pid === 2) {
+                await runSinglePlayerAI();
+            } else {
+                const moves = enumerateCandidateMoves(localGame, 1).filter(move => simulateLocalMove(localGame, 1, move).success);
+                if (!moves.length) break;
+                const move = moves[Math.floor(Math.random() * moves.length)];
+                applyLocalMove(1, move);
+            }
+        }
+        results.push({ game: g + 1, status: localGame.status, winner: localGame.winner, turns: localGame.turn, guard });
+    }
+
+    session.aiEngine = previousEngine;
+    session.gameMode = previousMode;
+    localAIBrain = null;
+    console.table(results);
+    return results;
+}
+window.runAlphaZeroCompatibilityCheck = runAlphaZeroCompatibilityCheck;
+
 // ==================== SESSION STATE ====================
 let session = {
     roomCode: null,
@@ -2288,7 +2361,8 @@ let session = {
     playerNum: null,
     pollTimer: null,
     gameMode: 'online',
-    aiDifficulty: 'strong'
+    aiDifficulty: 'strong',
+    aiEngine: 'mcts'
 };
 
 // Local mirror of the filtered server state
