@@ -227,6 +227,19 @@ class AlphaZeroNet(nn.Module):
         return self.policy_head(z), self.value_head(z).squeeze(-1)
 
 
+class OnnxPolicyValueWrapper(nn.Module):
+    """Exports logits, probabilities, and scalar value in one ONNX graph."""
+
+    def __init__(self, model: AlphaZeroNet) -> None:
+        super().__init__()
+        self.model = model
+
+    def forward(self, state: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        policy_logits, value = self.model(state)
+        policy_probs = torch.softmax(policy_logits, dim=-1)
+        return policy_logits, policy_probs, value
+
+
 @dataclass
 class Node:
     state: pythonport.GameState
@@ -523,6 +536,95 @@ def write_metadata(path: Path, metadata: Dict) -> None:
         json.dump(metadata, f, indent=2, sort_keys=True)
 
 
+def _build_export_net(model_ckpt: Path) -> Tuple[AlphaZeroNet, int]:
+    env = PsychometricDuelEnv()
+    action_space = ActionSpace()
+    input_dim = int(encode_state(env.initial_state(), 1).shape[0])
+
+    ckpt = torch.load(model_ckpt, map_location="cpu")
+    ckpt_meta = ckpt.get("metadata", {})
+    hidden_dim = int(ckpt_meta.get("hyperparameters", {}).get("hidden_dim", 256))
+
+    model = AlphaZeroNet(input_dim=input_dim, action_dim=action_space.size(), hidden_dim=hidden_dim)
+    model.load_state_dict(ckpt["model"])
+    model.eval()
+    return model, input_dim
+
+
+def _make_verification_states(env: PsychometricDuelEnv, batch_size: int, seed: int) -> np.ndarray:
+    rng = random.Random(seed)
+    states = []
+    state = env.initial_state()
+    to_play = env.current_player(state)
+    for _ in range(batch_size):
+        states.append(encode_state(state, to_play))
+        legal = env.legal_actions(state)
+        if not legal:
+            state = env.initial_state()
+            to_play = env.current_player(state)
+            continue
+        action = rng.choice(legal)
+        state = env.next_state(state, action)
+        to_play = env.current_player(state)
+        if env.is_terminal(state):
+            state = env.initial_state()
+            to_play = env.current_player(state)
+    return np.stack(states, axis=0).astype(np.float32)
+
+
+def export_onnx(model_ckpt: Path, out_path: Path, max_abs_error: float = 1e-4, verification_batch_size: int = 8) -> Dict[str, float]:
+    """Export checkpoint to ONNX and verify ONNXRuntime numerics vs PyTorch."""
+    import onnxruntime as ort
+
+    model, input_dim = _build_export_net(model_ckpt)
+    wrapper = OnnxPolicyValueWrapper(model)
+    wrapper.eval()
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    dummy_input = torch.zeros((1, input_dim), dtype=torch.float32)
+    torch.onnx.export(
+        wrapper,
+        dummy_input,
+        out_path,
+        input_names=["state"],
+        output_names=["policy_logits", "policy_probs", "value"],
+        dynamic_axes={
+            "state": {0: "batch"},
+            "policy_logits": {0: "batch"},
+            "policy_probs": {0: "batch"},
+            "value": {0: "batch"},
+        },
+        opset_version=18,
+        dynamo=False,
+    )
+
+    env = PsychometricDuelEnv()
+    test_batch = _make_verification_states(env, verification_batch_size, seed=13)
+    test_tensor = torch.from_numpy(test_batch)
+
+    with torch.no_grad():
+        torch_logits, torch_probs, torch_value = wrapper(test_tensor)
+
+    session = ort.InferenceSession(str(out_path), providers=["CPUExecutionProvider"])
+    ort_logits, ort_probs, ort_value = session.run(None, {"state": test_batch})
+
+    max_err_logits = float(np.max(np.abs(torch_logits.numpy() - ort_logits)))
+    max_err_probs = float(np.max(np.abs(torch_probs.numpy() - ort_probs)))
+    max_err_value = float(np.max(np.abs(torch_value.numpy() - ort_value)))
+    overall = max(max_err_logits, max_err_probs, max_err_value)
+    if overall > max_abs_error:
+        raise ValueError(
+            f"ONNX verification failed: max abs error {overall:.6g} exceeds threshold {max_abs_error:.6g}."
+        )
+
+    return {
+        "max_abs_error_logits": max_err_logits,
+        "max_abs_error_probs": max_err_probs,
+        "max_abs_error_value": max_err_value,
+        "max_abs_error_overall": overall,
+    }
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train AlphaZero-style model for Psychometric Duel.")
     p.add_argument("--iterations", type=int, default=20)
@@ -546,6 +648,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output-dir", type=Path, default=Path("checkpoints"))
     p.add_argument("--device", type=str, default="cpu")
     p.add_argument("--verbose", action="store_true")
+    p.add_argument("--export-onnx-checkpoint", type=Path, default=None)
+    p.add_argument("--export-onnx-path", type=Path, default=Path("ai/models/alphazero_best.onnx"))
+    p.add_argument("--onnx-max-abs-error", type=float, default=1e-4)
+    p.add_argument("--onnx-verification-batch-size", type=int, default=8)
+    p.add_argument("--export-onnx-only", action="store_true")
     return p.parse_args()
 
 
@@ -553,6 +660,18 @@ def main() -> None:
     args = parse_args()
     configure_logging(args.verbose)
     set_global_seed(args.seed)
+
+    if args.export_onnx_only:
+        if args.export_onnx_checkpoint is None:
+            raise ValueError("--export-onnx-only requires --export-onnx-checkpoint.")
+        export_stats = export_onnx(
+            model_ckpt=args.export_onnx_checkpoint,
+            out_path=args.export_onnx_path,
+            max_abs_error=args.onnx_max_abs_error,
+            verification_batch_size=args.onnx_verification_batch_size,
+        )
+        LOGGER.info("ONNX export complete at %s with verification stats: %s", args.export_onnx_path, export_stats)
+        return
 
     device = torch.device(args.device)
     env = PsychometricDuelEnv()
@@ -651,6 +770,18 @@ def main() -> None:
             win_rate,
             promoted,
         )
+
+    export_ckpt = args.export_onnx_checkpoint or (args.output_dir / "best.pt")
+    if export_ckpt.exists():
+        export_stats = export_onnx(
+            model_ckpt=export_ckpt,
+            out_path=args.export_onnx_path,
+            max_abs_error=args.onnx_max_abs_error,
+            verification_batch_size=args.onnx_verification_batch_size,
+        )
+        LOGGER.info("ONNX export complete at %s with verification stats: %s", args.export_onnx_path, export_stats)
+    else:
+        LOGGER.warning("Skipping ONNX export because checkpoint does not exist: %s", export_ckpt)
 
 
 if __name__ == "__main__":

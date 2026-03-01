@@ -1,0 +1,2 @@
+ai/models/*.onnx
+ai/models/*.onnx.data

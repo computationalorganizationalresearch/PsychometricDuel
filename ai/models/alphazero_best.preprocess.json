@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "model_artifact": "ai/models/alphazero_best.onnx",
+  "input": {
+    "name": "state",
+    "dtype": "float32",
+    "shape": ["batch", 69],
+    "encoding_function": "train_alphazero.encode_state",
+    "normalization": {
+      "lp": "lp / 8000.0",
+      "hand_size": "len(hand) / 12.0",
+      "deck_size": "len(deck) / 80.0",
+      "experience_tokens": "tokens / 10.0",
+      "construct_stack_size": "len(cards) / 3.0",
+      "monster_atk": "atk / 10000.0",
+      "monster_base_n": "baseN / 500.0",
+      "flags": "booleans encoded as 0.0/1.0"
+    }
+  },
+  "outputs": [
+    {
+      "name": "policy_logits",
+      "dtype": "float32",
+      "shape": ["batch", 243],
+      "description": "Raw action logits over static ActionSpace IDs."
+    },
+    {
+      "name": "policy_probs",
+      "dtype": "float32",
+      "shape": ["batch", 243],
+      "description": "Softmax(policy_logits)."
+    },
+    {
+      "name": "value",
+      "dtype": "float32",
+      "shape": ["batch"],
+      "description": "Predicted scalar value in [-1, 1] from current player perspective."
+    }
+  ]
+}
