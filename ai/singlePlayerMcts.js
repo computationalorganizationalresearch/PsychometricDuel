@@ -439,8 +439,47 @@
                     existing.valueSum += signed;
                 } else {
                     setWithLimit(transpositionTable, node.stateHash, { visits: 1, valueSum: signed }, MAX_TT_ENTRIES);
+                    transpositionTable.set(node.stateHash, { visits: 1, valueSum: signed });
                 }
             }
+        }
+
+        function shouldEarlyStop(root, elapsedMs, thinkMs) {
+            if (!root.children || root.children.length < 2) return false;
+            if (elapsedMs < thinkMs * 0.45 || root.visits < EARLY_STOP_MIN_VISITS) return false;
+
+            let first = null;
+            let second = null;
+            for (let i = 0; i < root.children.length; i += 1) {
+                const child = root.children[i];
+                if (!first || child.visits > first.visits) {
+                    second = first;
+                    first = child;
+                } else if (!second || child.visits > second.visits) {
+                    second = child;
+                }
+            }
+            if (!first || !second) return false;
+
+            const share = first.visits / Math.max(1, root.visits);
+            const qGap = first.qValue() - second.qValue();
+            return share >= EARLY_STOP_VISIT_SHARE && qGap > 45;
+        }
+
+        function finalMoveSelection(children) {
+            if (!children.length) return null;
+            let best = children[0];
+            let bestScore = -Infinity;
+
+            for (let i = 0; i < children.length; i += 1) {
+                const child = children[i];
+                const score = (child.visits * 1.1) + (child.qValue() * 0.9);
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = child;
+                }
+            }
+            return best;
         }
 
         function shouldEarlyStop(root, elapsedMs, thinkMs) {
