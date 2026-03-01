@@ -585,7 +585,12 @@ function moveSummon(&$state, &$me, $pNum, $move) {
     if (!$out || $out['type'] !== 'outcome') return ['ok'=>false,'msg'=>'Invalid outcome'];
 
     $mSlot = array_search(null, $me['monsters'], true);
-    if ($mSlot === false) return ['ok'=>false,'msg'=>'No empty monster slot'];
+    if ($mSlot === false) {
+        $replaceSlot = (int)($move['replace_monster_slot'] ?? -1);
+        if ($replaceSlot < 0 || $replaceSlot > 2) return ['ok'=>false,'msg'=>'Choose a monster slot to replace'];
+        if (empty($me['monsters'][$replaceSlot])) return ['ok'=>false,'msg'=>'Select an occupied monster slot to replace'];
+        $mSlot = $replaceSlot;
+    }
 
     $tv = getTrueValidity();
     $mn = getMonsterNames();
@@ -627,12 +632,17 @@ function moveSummon(&$state, &$me, $pNum, $move) {
     ];
     refreshMonsterStats($monster);
 
+    $replacedMonster = $me['monsters'][$mSlot] ?? null;
     $me['monsters'][$mSlot] = $monster;
     $me['constructs'][$predSlot] = null;
     $me['constructs'][$outSlot] = null;
     $me['summoned_this_turn'] = true;
 
-    $state['log'][] = ['msg' => "P{$pNum} summons {$monster['name']} (ATK {$monster['atk']}, PWR " . floor($monster['power'] * 100) . "%).", 'type' => 'formula-log'];
+    if ($replacedMonster) {
+        $state['log'][] = ['msg' => "P{$pNum} summons {$monster['name']} (ATK {$monster['atk']}, PWR " . floor($monster['power'] * 100) . "%) by replacing {$replacedMonster['name']}.", 'type' => 'formula-log'];
+    } else {
+        $state['log'][] = ['msg' => "P{$pNum} summons {$monster['name']} (ATK {$monster['atk']}, PWR " . floor($monster['power'] * 100) . "%).", 'type' => 'formula-log'];
+    }
     return ['ok'=>true,'msg'=>'Summoned'];
 }
 
