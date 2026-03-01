@@ -10,7 +10,11 @@
             noise: 0.2,
             wideningStep: 3,
             tacticalDepthBonus: 1,
-            simulationTemperature: 1.25
+            simulationTemperature: 1.25,
+            maxThinkPerMove: 320,
+            maxSimulations: 240,
+            turnBudgetMs: 900,
+            maxChainMoves: 8
         },
         balanced: {
             label: 'Balanced',
@@ -22,7 +26,11 @@
             noise: 0.08,
             wideningStep: 4,
             tacticalDepthBonus: 2,
-            simulationTemperature: 1.0
+            simulationTemperature: 1.0,
+            maxThinkPerMove: 700,
+            maxSimulations: 520,
+            turnBudgetMs: 1600,
+            maxChainMoves: 10
         },
         strong: {
             label: 'Strong',
@@ -34,7 +42,11 @@
             noise: 0.02,
             wideningStep: 5,
             tacticalDepthBonus: 3,
-            simulationTemperature: 0.85
+            simulationTemperature: 0.85,
+            maxThinkPerMove: 1200,
+            maxSimulations: 900,
+            turnBudgetMs: 2400,
+            maxChainMoves: 12
         },
         expert: {
             label: 'Expert',
@@ -46,7 +58,11 @@
             noise: 0,
             wideningStep: 6,
             tacticalDepthBonus: 4,
-            simulationTemperature: 0.65
+            simulationTemperature: 0.65,
+            maxThinkPerMove: 1700,
+            maxSimulations: 1300,
+            turnBudgetMs: 3200,
+            maxChainMoves: 14
         }
     };
 
@@ -92,6 +108,7 @@
         const evalCache = new Map();
         const transitionCache = new Map();
         const transpositionTable = new Map();
+        const criticalityCache = new Map();
         const objectHashCache = new WeakMap();
 
         const VALUE_CLAMP = 5000;
@@ -104,6 +121,7 @@
         const MAX_EVAL_CACHE = 1800;
         const MAX_TRANSITION_CACHE = 1800;
         const MAX_TT_ENTRIES = 2200;
+        const MAX_CRITICALITY_CACHE = 1200;
 
         function clamp(value, min, max) {
             return Math.max(min, Math.min(max, value));
@@ -126,6 +144,7 @@
             evalCache.clear();
             transitionCache.clear();
             transpositionTable.clear();
+            criticalityCache.clear();
         }
 
         function cachedStateKey(state, pid) {
@@ -198,15 +217,20 @@
         }
 
         function profileCriticality(state, pid) {
+            const cacheKey = `${cachedStateKey(state, pid)}|criticality`;
+            if (criticalityCache.has(cacheKey)) return criticalityCache.get(cacheKey);
+
             const moves = enumerateWithCache(state, pid, true);
             const branching = moves.length;
             if (!branching) {
-                return {
+                const empty = {
                     branching,
                     tacticalVolatility: 0,
                     closeContest: 0,
                     criticality: 0
                 };
+                setWithLimit(criticalityCache, cacheKey, empty, MAX_CRITICALITY_CACHE);
+                return empty;
             }
 
             const scored = [];
@@ -224,7 +248,9 @@
             const branchFactor = branching > 20 ? 1 : branching > 12 ? 0.65 : 0.35;
             const criticality = Math.min(1, (closeContest * 0.45) + (tacticalVolatility * 0.35) + (branchFactor * 0.2));
 
-            return { branching, tacticalVolatility, closeContest, criticality };
+            const result = { branching, tacticalVolatility, closeContest, criticality };
+            setWithLimit(criticalityCache, cacheKey, result, MAX_CRITICALITY_CACHE);
+            return result;
         }
 
         function resolveProfile(state) {
@@ -234,8 +260,8 @@
             const diagnostics = profileCriticality(state, currentPid);
 
             const branchingBonus = diagnostics.branching > 24 ? 1400 : diagnostics.branching > 16 ? 700 : diagnostics.branching > 10 ? 300 : 0;
-            const criticalityBonus = Math.floor(profile.thinkMs * 0.85 * diagnostics.criticality);
-            const maxThink = Math.floor(profile.thinkMs * 2.4);
+            const criticalityBonus = Math.floor(profile.thinkMs * 0.45 * diagnostics.criticality);
+            const maxThink = Math.floor(profile.thinkMs * 1.35);
 
             return {
                 ...profile,
@@ -520,6 +546,44 @@
             return best;
         }
 
+        function shouldEarlyStop(root, elapsedMs, thinkMs) {
+            if (!root.children || root.children.length < 2) return false;
+            if (elapsedMs < thinkMs * 0.45 || root.visits < EARLY_STOP_MIN_VISITS) return false;
+
+            let first = null;
+            let second = null;
+            for (let i = 0; i < root.children.length; i += 1) {
+                const child = root.children[i];
+                if (!first || child.visits > first.visits) {
+                    second = first;
+                    first = child;
+                } else if (!second || child.visits > second.visits) {
+                    second = child;
+                }
+            }
+            if (!first || !second) return false;
+
+            const share = first.visits / Math.max(1, root.visits);
+            const qGap = first.qValue() - second.qValue();
+            return share >= EARLY_STOP_VISIT_SHARE && qGap > 45;
+        }
+
+        function finalMoveSelection(children) {
+            if (!children.length) return null;
+            let best = children[0];
+            let bestScore = -Infinity;
+
+            for (let i = 0; i < children.length; i += 1) {
+                const child = children[i];
+                const score = (child.visits * 1.1) + (child.qValue() * 0.9);
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = child;
+                }
+            }
+            return best;
+        }
+
         function chooseMoveWithMcts(state, pid, profile) {
             resetSearchCaches();
 
@@ -534,8 +598,13 @@
             if (!root.children.length) return null;
             if (root.children.length === 1) return root.children[0].move;
 
+            const searchBudgetMs = Math.min(profile.thinkMs, profile.maxThinkPerMove || profile.thinkMs);
+            const simulationCap = Math.max(80, profile.maxSimulations || Math.floor(searchBudgetMs * 0.8));
+
             const start = performance.now();
-            while (performance.now() - start < profile.thinkMs) {
+            let iterations = 0;
+            while ((performance.now() - start) < searchBudgetMs && iterations < simulationCap) {
+                iterations += 1;
                 maybeWidenRoot(root, profile);
                 const path = [root];
                 let node = root;
@@ -561,6 +630,7 @@
                 const value = simulateLeaf(node, profile);
                 backpropagate(path, value, pid);
 
+                if (shouldEarlyStop(root, performance.now() - start, searchBudgetMs)) break;
                 if (shouldEarlyStop(root, performance.now() - start, profile.thinkMs)) break;
             }
 
@@ -580,10 +650,14 @@
             let state = adapter.getState();
             if (!state || state.status !== 'active' || state.currentPlayer !== pid) return;
             const profile = resolveProfile(state);
-            await new Promise(r => setTimeout(r, Math.max(120, profile.thinkMs * 0.22)));
+            await new Promise(r => setTimeout(r, Math.min(180, Math.max(60, profile.thinkMs * 0.12))));
+
+            const turnStarted = performance.now();
+            const turnBudgetMs = Math.max(300, profile.turnBudgetMs || profile.thinkMs);
+            const maxChainMoves = Math.max(4, profile.maxChainMoves || 10);
 
             let guard = 0;
-            while (guard++ < 16) {
+            while (guard++ < maxChainMoves && (performance.now() - turnStarted) < turnBudgetMs) {
                 state = adapter.getState();
                 if (!state || state.status !== 'active' || state.currentPlayer !== pid) break;
                 const move = chooseMoveWithMcts(state, pid, profile);
