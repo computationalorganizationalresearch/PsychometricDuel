@@ -18,7 +18,7 @@ const STARTING_HAND_SIZE = 12;
 const EXPERIENCE_MISS_THRESHOLD = 4;
 const EXPERIENCE_DRAW_COUNT = 3;
 const MONSTER_BASE_N = 50;
-const META_BASE_N = 50;
+const META_BASE_N = 150;
 
 $MONSTER_SPRITES = ['⚔️','🐉','🦁','🔥','💎','🌟','🗡️','🛡️','👁️','🌀'];
 
@@ -829,6 +829,11 @@ function moveMeta(&$state, &$me, $pNum) {
     $short = $constructs[$id]['short'] ?? 'META';
 
     $metaRTrue = clamp($meanR * 1.35, 0.35, 0.95);
+    $combinedBaseN = array_reduce($m, function($sum, $monster) {
+        if (!$monster) return $sum;
+        return $sum + ($monster['baseN'] ?? MONSTER_BASE_N);
+    }, 0);
+
     $meta = [
         'name' => "Meta-{$short} Titan",
         'sprite' => '🌌',
@@ -844,11 +849,11 @@ function moveMeta(&$state, &$me, $pNum) {
         'rObs' => $metaRTrue,
         'baseAtk' => (int) round(abs($metaRTrue) * 10000),
         'atk' => 0,
-        'baseN' => META_BASE_N,
-        'n' => META_BASE_N,
-        'power' => clamp(0.9 + (META_BASE_N / 1000), 0.9, 0.99),
+        'baseN' => $combinedBaseN,
+        'n' => $combinedBaseN,
+        'power' => clamp(0.9 + ($combinedBaseN / 1000), 0.9, 0.99),
         'attacksMade' => 0,
-        'maxAttacks' => 2,
+        'maxAttacks' => 1,
         'summoningSick' => false,
         'hasJobRelevance' => false,
         'hasImputation' => false,
@@ -877,7 +882,7 @@ function resetMonstersForTurn(&$player) {
         }
         $m['summoningSick'] = false;
         $m['attacksMade'] = 0;
-        $m['maxAttacks'] = !empty($m['isMeta']) ? 2 : 1;
+        $m['maxAttacks'] = 1;
         refreshMonsterStats($m);
     }
 }
