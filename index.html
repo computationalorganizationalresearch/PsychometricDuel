@@ -2304,10 +2304,6 @@ let mulliganSelection = new Set();
 let discardPromptRequiredForCount = 0;
 let discardPromptAcknowledged = false;
 
-function needsDiscardPromptAck() {
-    return !!(gs && (gs.pending_discard_count || 0) > 0 && !discardPromptAcknowledged);
-}
-
 // ==================== API CALLS ====================
 async function apiCall(body) {
     try {
@@ -2995,7 +2991,6 @@ function cancelAction() {
 function selectHandCard(idx) {
     if (isMulliganPending()) return;
     if ((gs.pending_discard_count || 0) > 0) {
-        if (needsDiscardPromptAck()) {
         if (!discardPromptAcknowledged) {
             syncDiscardWarningOverlay();
             return;
@@ -3052,10 +3047,6 @@ function selectHandCard(idx) {
 
 async function discardHandCard(idx) {
     if ((gs?.pending_discard_count || 0) <= 0) return;
-    if (needsDiscardPromptAck()) {
-        syncDiscardWarningOverlay();
-        return;
-    }
     selectedHandCard = null;
     uiPhase = 'idle';
     await submitMove({ type: 'discard_card', hand_index: idx });
