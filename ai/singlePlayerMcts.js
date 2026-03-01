@@ -275,10 +275,42 @@
             if (!transition.success) return { score: -100000, transition };
 
             const nextState = transition.state;
+            const meBefore = state.players && state.players[pid];
+            const oppBefore = state.players && state.players[pid === 1 ? 2 : 1];
+            const meAfter = nextState.players && nextState.players[pid];
+            const oppAfter = nextState.players && nextState.players[pid === 1 ? 2 : 1];
+
             const base = evaluateWithCache(nextState, rootPid);
             let tactical = 0;
 
-            if (move && move.type === 'end_turn') tactical -= 10;
+            if (move && move.type === 'end_turn') {
+                const legalWithoutEnd = enumerateWithCache(state, pid, false);
+                const actionableMoves = legalWithoutEnd.filter(candidate => candidate && candidate.type !== 'end_turn').length;
+                tactical -= 35 + (actionableMoves * 6);
+            }
+
+            if (move && move.type === 'attack') {
+                if (move.target_type === 'lp') tactical += 180;
+                else tactical += 120;
+
+                if (oppBefore && oppAfter) {
+                    const oppMonstersBefore = oppBefore.monsters.filter(Boolean).length;
+                    const oppMonstersAfter = oppAfter.monsters.filter(Boolean).length;
+                    tactical += (oppMonstersBefore - oppMonstersAfter) * 90;
+                    tactical += (oppBefore.lp - oppAfter.lp) * 0.45;
+                }
+            }
+
+            if (move && move.type === 'summon' && meBefore && meAfter) {
+                const myMonstersBefore = meBefore.monsters.filter(Boolean).length;
+                const myMonstersAfter = meAfter.monsters.filter(Boolean).length;
+                tactical += (myMonstersAfter - myMonstersBefore) * 135;
+            }
+
+            if (move && move.type === 'meta') tactical += 160;
+            if (move && move.type === 'place_card') tactical += 70;
+            if (move && move.type === 'play_spell') tactical += 85;
+
             if (nextState.status && nextState.status !== 'active') tactical += 2200;
             if (nextState.currentPlayer === rootPid) tactical += 30;
             else tactical += 10;
@@ -492,42 +524,15 @@
             return share >= EARLY_STOP_VISIT_SHARE && qGap > 45;
         }
 
-        function finalMoveSelection(children) {
-            if (!children.length) return null;
-            let best = children[0];
-            let bestScore = -Infinity;
-
-            for (let i = 0; i < children.length; i += 1) {
-                const child = children[i];
-                const score = (child.visits * 1.1) + (child.qValue() * 0.9);
-                if (score > bestScore) {
-                    bestScore = score;
-                    best = child;
-                }
-            }
-            return best;
-        }
-
-        function shouldEarlyStop(root, elapsedMs, thinkMs) {
-            if (!root.children || root.children.length < 2) return false;
-            if (elapsedMs < thinkMs * 0.45 || root.visits < EARLY_STOP_MIN_VISITS) return false;
-
-            let first = null;
-            let second = null;
-            for (let i = 0; i < root.children.length; i += 1) {
-                const child = root.children[i];
-                if (!first || child.visits > first.visits) {
-                    second = first;
-                    first = child;
-                } else if (!second || child.visits > second.visits) {
-                    second = child;
-                }
-            }
-            if (!first || !second) return false;
-
-            const share = first.visits / Math.max(1, root.visits);
-            const qGap = first.qValue() - second.qValue();
-            return share >= EARLY_STOP_VISIT_SHARE && qGap > 45;
+        function strategicMoveBonus(move) {
+            if (!move) return 0;
+            if (move.type === 'attack') return move.target_type === 'lp' ? 95 : 70;
+            if (move.type === 'summon') return 65;
+            if (move.type === 'meta') return 80;
+            if (move.type === 'play_spell') return 40;
+            if (move.type === 'place_card') return 35;
+            if (move.type === 'end_turn') return -60;
+            return 0;
         }
 
         function finalMoveSelection(children) {
@@ -537,45 +542,7 @@
 
             for (let i = 0; i < children.length; i += 1) {
                 const child = children[i];
-                const score = (child.visits * 1.1) + (child.qValue() * 0.9);
-                if (score > bestScore) {
-                    bestScore = score;
-                    best = child;
-                }
-            }
-            return best;
-        }
-
-        function shouldEarlyStop(root, elapsedMs, thinkMs) {
-            if (!root.children || root.children.length < 2) return false;
-            if (elapsedMs < thinkMs * 0.45 || root.visits < EARLY_STOP_MIN_VISITS) return false;
-
-            let first = null;
-            let second = null;
-            for (let i = 0; i < root.children.length; i += 1) {
-                const child = root.children[i];
-                if (!first || child.visits > first.visits) {
-                    second = first;
-                    first = child;
-                } else if (!second || child.visits > second.visits) {
-                    second = child;
-                }
-            }
-            if (!first || !second) return false;
-
-            const share = first.visits / Math.max(1, root.visits);
-            const qGap = first.qValue() - second.qValue();
-            return share >= EARLY_STOP_VISIT_SHARE && qGap > 45;
-        }
-
-        function finalMoveSelection(children) {
-            if (!children.length) return null;
-            let best = children[0];
-            let bestScore = -Infinity;
-
-            for (let i = 0; i < children.length; i += 1) {
-                const child = children[i];
-                const score = (child.visits * 1.1) + (child.qValue() * 0.9);
+                const score = (child.visits * 0.85) + (child.qValue() * 1.25) + strategicMoveBonus(child.move);
                 if (score > bestScore) {
                     bestScore = score;
                     best = child;
@@ -641,7 +608,8 @@
 
             const primary = finalMoveSelection(root.children);
             if (profile.noise > 0 && root.children.length > 1 && Math.random() < profile.noise) {
-                return root.children[1].move;
+                const fallback = root.children.find(child => child.move && child.move.type !== 'end_turn' && child !== primary);
+                return (fallback || root.children[1]).move;
             }
             return primary ? primary.move : root.children[0].move;
         }
