@@ -790,6 +790,15 @@
         </div>
     </div>
 
+    <div class="modal-overlay" id="discard-warning-modal">
+        <div class="modal-box">
+            <h2>HAND LIMIT EXCEEDED</h2>
+            <p>You have too many cards in your hand.</p>
+            <p>Click <strong>CONTINUE</strong>, then choose which card(s) to trash.</p>
+            <button class="start-btn" style="display:block; margin: 2cqmin auto 0;" onclick="acknowledgeDiscardWarning()">CONTINUE</button>
+        </div>
+    </div>
+
     <!-- ===== GAME SCREEN ===== -->
     <div id="game-screen">
         <div class="top-bar">
@@ -2292,6 +2301,12 @@ let attackingMonsterSlot = null;
 let gameOver = false;
 let lastLogCount = 0;
 let mulliganSelection = new Set();
+let discardPromptRequiredForCount = 0;
+let discardPromptAcknowledged = false;
+
+function needsDiscardPromptAck() {
+    return !!(gs && (gs.pending_discard_count || 0) > 0 && !discardPromptAcknowledged);
+}
 
 // ==================== API CALLS ====================
 async function apiCall(body) {
@@ -2663,6 +2678,32 @@ function syncMulliganOverlay() {
     renderMulliganHand();
 }
 
+function syncDiscardWarningOverlay() {
+    const modal = document.getElementById('discard-warning-modal');
+    if (!modal || !gs) return;
+
+    const mustDiscardCount = gs.pending_discard_count || 0;
+    if (mustDiscardCount <= 0 || gameOver || isMulliganPending()) {
+        modal.classList.remove('active');
+        discardPromptRequiredForCount = 0;
+        discardPromptAcknowledged = false;
+        return;
+    }
+
+    if (mustDiscardCount !== discardPromptRequiredForCount) {
+        discardPromptRequiredForCount = mustDiscardCount;
+        discardPromptAcknowledged = false;
+    }
+
+    modal.classList.toggle('active', !discardPromptAcknowledged);
+}
+
+function acknowledgeDiscardWarning() {
+    if (!gs || (gs.pending_discard_count || 0) <= 0) return;
+    discardPromptAcknowledged = true;
+    syncDiscardWarningOverlay();
+}
+
 function toggleMulliganSelect(idx) {
     if (!isMulliganPending()) return;
     if (mulliganSelection.has(idx)) mulliganSelection.delete(idx);
@@ -2730,6 +2771,7 @@ function renderAll() {
     }
 
     syncMulliganOverlay();
+    syncDiscardWarningOverlay();
 }
 
 function renderExperiencePanel() {
@@ -2953,6 +2995,10 @@ function cancelAction() {
 function selectHandCard(idx) {
     if (isMulliganPending()) return;
     if ((gs.pending_discard_count || 0) > 0) {
+        if (needsDiscardPromptAck()) {
+            syncDiscardWarningOverlay();
+            return;
+        }
         discardHandCard(idx);
         return;
     }
@@ -3005,6 +3051,10 @@ function selectHandCard(idx) {
 
 async function discardHandCard(idx) {
     if ((gs?.pending_discard_count || 0) <= 0) return;
+    if (needsDiscardPromptAck()) {
+        syncDiscardWarningOverlay();
+        return;
+    }
     selectedHandCard = null;
     uiPhase = 'idle';
     await submitMove({ type: 'discard_card', hand_index: idx });
