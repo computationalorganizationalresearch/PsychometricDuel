@@ -525,6 +525,14 @@
     .action-btn.meta { border-color: var(--meta); color: var(--meta); }
     .action-btn.end-turn { border-color: var(--predictor-light); color: var(--predictor-light); }
     .action-btn.cancel { border-color: var(--gray); color: var(--gray); display: none; }
+    .action-hint {
+        min-height: 1.8cqmin;
+        text-align: center;
+        font-size: 0.95cqmin;
+        color: var(--predictor-light);
+        letter-spacing: 0.05cqmin;
+        padding: 0.2cqmin 1cqmin 0.8cqmin;
+    }
 
     .hand-area {
         height: 22%; width: 100%; flex-shrink: 0;
@@ -850,6 +858,7 @@
             <button class="action-btn cancel" id="btn-cancel" onclick="cancelAction()">CANCEL</button>
             <button class="action-btn end-turn" id="btn-end" onclick="doEndTurn()" disabled>END TURN</button>
         </div>
+        <div class="action-hint" id="action-hint"></div>
 
         <div class="hand-area">
             <div class="hand-label">
@@ -2507,7 +2516,10 @@ function renderMonsterSlot(slotIdx, owner) {
     if (m) ensureMonsterFlavor(m);
 
     // Spell targeting highlights
-    if (uiPhase === 'spell_target_range' && owner === 'opp' && m) {
+    if (uiPhase === 'summon_select_replace' && owner === 'player' && m) {
+        slot.classList.add('highlight');
+        slot.onclick = () => onMonsterSlotClick(slotIdx);
+    } else if (uiPhase === 'spell_target_range' && owner === 'opp' && m) {
         slot.classList.add('spell-target');
         slot.onclick = () => executeRangeRestrict(slotIdx);
     } else if (uiPhase === 'spell_target_practice_effect' && owner === 'opp' && m) {
@@ -2552,7 +2564,9 @@ function renderMonsterSlot(slotIdx, owner) {
     if (m.isMeta) div.classList.add('is-meta');
     if (attackingMonsterSlot === slotIdx && owner === 'player') div.classList.add('attacking');
 
-    if (owner === 'player' && uiPhase === 'attack_select_monster' && canMonsterAttack(m)) {
+    if (owner === 'player' && uiPhase === 'summon_select_replace') {
+        div.onclick = () => onMonsterSlotClick(slotIdx);
+    } else if (owner === 'player' && uiPhase === 'attack_select_monster' && canMonsterAttack(m)) {
         div.onclick = () => selectAttackingMonster(slotIdx);
     } else if (owner === 'opp' && uiPhase === 'attack_select_target') {
         slot.classList.add('attack-target');
@@ -2770,6 +2784,15 @@ function updateButtons() {
     document.getElementById('btn-end').disabled = !(isMyTurn && isIdle && !mustDiscard);
     document.getElementById('btn-experience-draw').disabled = !(isMyTurn && isIdle && !mustDiscard && (gs.my_experience_tokens || 0) >= EXPERIENCE_MISS_THRESHOLD && gs.my_deck_count > 0);
     document.getElementById('btn-cancel').style.display = (uiPhase !== 'idle' && isMyTurn) ? 'block' : 'none';
+
+    const actionHint = document.getElementById('action-hint');
+    if (actionHint) {
+        if (!isMyTurn || mustDiscard) actionHint.textContent = '';
+        else if (uiPhase === 'summon_select_pred') actionHint.textContent = 'Select a Predictor construct.';
+        else if (uiPhase === 'summon_select_out') actionHint.textContent = 'Select an Outcome construct.';
+        else if (uiPhase === 'summon_select_replace') actionHint.textContent = 'Monster slots are full: click one of your monsters to replace it.';
+        else actionHint.textContent = '';
+    }
 
     const handLabel = document.querySelector('.hand-label span');
     if (handLabel) {
