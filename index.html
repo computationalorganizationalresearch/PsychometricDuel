@@ -1844,8 +1844,20 @@ function applyLocalMove(pid, move) {
     else if (move.type === 'summon') {
         if (me.summoned) return { success: false, message: 'You can only summon once per turn' };
 
-        const mSlot = firstEmptySlot(me.monsters);
-        if (mSlot === -1) return { success: false, message: 'No empty monster slot' };
+        const firstOpenMonsterSlot = firstEmptySlot(me.monsters);
+        const hasFullMonsterRow = firstOpenMonsterSlot === -1;
+        const requestedReplaceSlot = Number.isInteger(move.replace_monster_slot) ? move.replace_monster_slot : -1;
+        let mSlot = firstOpenMonsterSlot;
+
+        if (hasFullMonsterRow) {
+            if (requestedReplaceSlot < 0 || requestedReplaceSlot > 2) {
+                return { success: false, message: 'Choose a monster slot to replace' };
+            }
+            if (!me.monsters[requestedReplaceSlot]) {
+                return { success: false, message: 'Select an occupied monster slot to replace' };
+            }
+            mSlot = requestedReplaceSlot;
+        }
 
         if (move.pred_slot === move.out_slot) {
             return { success: false, message: 'Predictor and Outcome must be different slots' };
@@ -1862,13 +1874,21 @@ function applyLocalMove(pid, move) {
         me.constructs[move.pred_slot] = null;
         me.constructs[move.out_slot] = null;
 
+        const replacedMonster = me.monsters[mSlot];
         me.monsters[mSlot] = monster;
         me.summoned = true;
 
-        logLocal(
-            `P${pid} summons ${monster.name} (ATK ${monster.atk}, PWR ${Math.floor(monster.power * 100)}%) by consuming construct materials.`,
-            'formula-log'
-        );
+        if (replacedMonster) {
+            logLocal(
+                `P${pid} summons ${monster.name} (ATK ${monster.atk}, PWR ${Math.floor(monster.power * 100)}%) by replacing ${replacedMonster.name}.`,
+                'formula-log'
+            );
+        } else {
+            logLocal(
+                `P${pid} summons ${monster.name} (ATK ${monster.atk}, PWR ${Math.floor(monster.power * 100)}%) by consuming construct materials.`,
+                'formula-log'
+            );
+        }
     }
     else if (move.type === 'play_spell') {
         const card = me.hand[move.hand_index];
@@ -2140,10 +2160,18 @@ function enumerateCandidateMoves(state, pid) {
         moves.push({ type: 'experience_draw' });
     }
 
-    if (!p.summoned && firstEmptySlot(p.monsters) !== -1) {
+    if (!p.summoned) {
+        const openMonsterSlot = firstEmptySlot(p.monsters);
         for (let pred_slot = 0; pred_slot < 3; pred_slot++) {
             for (let out_slot = 0; out_slot < 3; out_slot++) {
-                moves.push({ type: 'summon', pred_slot, out_slot });
+                if (openMonsterSlot !== -1) {
+                    moves.push({ type: 'summon', pred_slot, out_slot });
+                    continue;
+                }
+                for (let replace_monster_slot = 0; replace_monster_slot < 3; replace_monster_slot++) {
+                    if (!p.monsters[replace_monster_slot]) continue;
+                    moves.push({ type: 'summon', pred_slot, out_slot, replace_monster_slot });
+                }
             }
         }
     }
@@ -2224,6 +2252,7 @@ function startSinglePlayer() {
     gameOver = false;
     selectedHandCard = null;
     summonPredSlot = null;
+    summonOutSlot = null;
     attackingMonsterSlot = null;
     mulliganSelection = new Set();
     uiPhase = 'idle';
@@ -2248,6 +2277,7 @@ let gs = null; // game state from server
 let uiPhase = 'idle'; // local UI phase for selection
 let selectedHandCard = null;
 let summonPredSlot = null;
+let summonOutSlot = null;
 let attackingMonsterSlot = null;
 let gameOver = false;
 let lastLogCount = 0;
@@ -2730,7 +2760,7 @@ function updateButtons() {
 
     const canSummon = gs.my_constructs.some(c => c?.type === 'predictor') &&
                       gs.my_constructs.some(c => c?.type === 'outcome') &&
-                      !gs.my_summoned && gs.my_monsters.some(m => m === null);
+                      !gs.my_summoned;
     const canAttack = gs.my_monsters.some(m => canMonsterAttack(m));
     const canMeta = getMetaTarget() !== null;
 
@@ -2890,6 +2920,8 @@ function cancelAction() {
     uiPhase = 'idle';
     selectedHandCard = null;
     attackingMonsterSlot = null;
+    summonPredSlot = null;
+    summonOutSlot = null;
     clearSlotHighlights();
     renderAll();
 }
@@ -2984,10 +3016,22 @@ async function onConstructSlotClick(slotIdx) {
     if (uiPhase === 'summon_select_out') {
         if (slotIdx === summonPredSlot) return;
         if (gs.my_constructs[slotIdx]?.type === 'outcome') {
-            await submitMove({ type: 'summon', pred_slot: summonPredSlot, out_slot: slotIdx });
-            uiPhase = 'idle';
-            summonPredSlot = null;
-            clearSlotHighlights();
+            summonOutSlot = slotIdx;
+            const firstOpenMonsterSlot = gs.my_monsters.findIndex(m => m === null);
+            if (firstOpenMonsterSlot !== -1) {
+                await submitMove({ type: 'summon', pred_slot: summonPredSlot, out_slot: summonOutSlot });
+                uiPhase = 'idle';
+                summonPredSlot = null;
+                summonOutSlot = null;
+                clearSlotHighlights();
+            } else {
+                uiPhase = 'summon_select_replace';
+                clearSlotHighlights();
+                for (let i = 0; i < 3; i++) {
+                    if (gs.my_monsters[i]) document.getElementById(`player-monster-${i}`).classList.add('highlight');
+                }
+                renderAll();
+            }
         }
         return;
     }
@@ -3011,6 +3055,8 @@ function startSummon() {
     if (isMulliganPending()) return;
     if (!gs?.is_my_turn || gs.my_summoned) return;
     selectedHandCard = null;
+    summonPredSlot = null;
+    summonOutSlot = null;
     uiPhase = 'summon_select_pred';
     clearSlotHighlights();
     for (let i = 0; i < 3; i++) if (gs.my_constructs[i]?.type === 'predictor') document.getElementById(`player-construct-${i}`).classList.add('highlight');
@@ -3115,8 +3161,17 @@ async function executeCriterionContam(slotIdx) {
     selectedHandCard = null; uiPhase = 'idle'; clearSlotHighlights();
 }
 
-function onMonsterSlotClick(slotIdx) {
+async function onMonsterSlotClick(slotIdx) {
     if (isMulliganPending()) return;
+    if (uiPhase === 'summon_select_replace') {
+        if (!gs.my_monsters[slotIdx] || summonPredSlot === null || summonOutSlot === null) return;
+        await submitMove({ type: 'summon', pred_slot: summonPredSlot, out_slot: summonOutSlot, replace_monster_slot: slotIdx });
+        uiPhase = 'idle';
+        summonPredSlot = null;
+        summonOutSlot = null;
+        clearSlotHighlights();
+        return;
+    }
     if (uiPhase === 'spell_target_correct') executeCorrection(slotIdx);
     if (uiPhase === 'spell_target_sample_size') executeSampleSize(slotIdx);
     if (uiPhase === 'spell_target_job_relevance') executeJobRelevance(slotIdx);
