@@ -2303,6 +2303,7 @@ let lastLogCount = 0;
 let mulliganSelection = new Set();
 let discardPromptRequiredForCount = 0;
 let discardPromptAcknowledged = false;
+let discardPromptStateToken = '';
 
 // ==================== API CALLS ====================
 async function apiCall(body) {
@@ -2683,7 +2684,14 @@ function syncDiscardWarningOverlay() {
         modal.classList.remove('active');
         discardPromptRequiredForCount = 0;
         discardPromptAcknowledged = false;
+        discardPromptStateToken = '';
         return;
+    }
+
+    const discardStateToken = `${gs.turn_number || 0}:${mustDiscardCount}:${gs.my_hand.length || 0}`;
+    if (discardStateToken !== discardPromptStateToken) {
+        discardPromptStateToken = discardStateToken;
+        discardPromptAcknowledged = false;
     }
 
     if (mustDiscardCount !== discardPromptRequiredForCount) {
