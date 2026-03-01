@@ -430,6 +430,16 @@
         padding: 0.5cqmin 2cqmin; gap: 0.2cqmin;
     }
     .field-row { display: flex; gap: 0.8cqmin; justify-content: center; align-items: center; flex: 1; min-height: 0;}
+    .board-with-sidebar { display: flex; height: 100%; }
+    .experience-sidebar {
+        width: 10cqmin; border-right: 0.1cqmin solid rgba(255,255,255,0.1); padding: 0.8cqmin 0.6cqmin;
+        display: flex; flex-direction: column; align-items: center; gap: 0.7cqmin; background: rgba(8,8,20,0.8);
+    }
+    .xp-title { font-size: 0.75cqmin; color: var(--resource); text-align: center; line-height: 1.4; }
+    .xp-token-wrap { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.35cqmin; min-height: 3.5cqmin; }
+    .xp-token { width: 1.5cqmin; height: 1.5cqmin; border-radius: 50%; background: var(--resource); border: 0.12cqmin solid #ffd08a; box-shadow: 0 0 0.6cqmin rgba(255,152,0,0.4); }
+    .xp-sub { font-size: 0.6cqmin; color: var(--gray); text-align: center; line-height: 1.5; }
+    .xp-draw-btn { font-family: 'Press Start 2P', monospace; font-size: 0.62cqmin; padding: 0.7cqmin 0.4cqmin; width: 100%; }
     .field-label { font-size: 0.8cqmin; color: var(--gray); writing-mode: vertical-rl; padding: 0 0.5cqmin; }
     .field-divider { height: 0.2cqmin; width: 100%; background: linear-gradient(90deg, transparent, var(--gray), transparent); margin: 0.2cqmin 0; flex-shrink: 0;}
 
@@ -791,6 +801,14 @@
         <button class="persistent-help-link" onclick="showTutorial()">HOW TO PLAY</button>
 
         <div class="game-board">
+            <div class="board-with-sidebar">
+            <div class="experience-sidebar">
+                <div class="xp-title">EXPERIENCE</div>
+                <div class="xp-token-wrap" id="experience-tokens"></div>
+                <div class="xp-sub" id="experience-text">0 / 4 misses</div>
+                <button class="action-btn xp-draw-btn" id="btn-experience-draw" onclick="useExperienceDraw()" disabled>DRAW 3</button>
+            </div>
+            <div style="flex:1; display:flex; flex-direction:column;">
             <div class="opponent-side">
                 <div class="field-row" id="opp-hand-row" style="justify-content:center; gap: 0.5cqmin; margin-bottom: 0.5cqmin; height: 6cqmin;"></div>
                 <div class="field-row">
@@ -820,6 +838,8 @@
                     <div class="card-slot" id="player-monster-1" onclick="onMonsterSlotClick(1)"></div>
                     <div class="card-slot" id="player-monster-2" onclick="onMonsterSlotClick(2)"></div>
                 </div>
+            </div>
+            </div>
             </div>
         </div>
 
@@ -857,6 +877,8 @@
 const API_URL = 'api.php'; // Change to your API endpoint
 const MAX_HAND_SIZE = 12;
 const STARTING_HAND_SIZE = 12;
+const EXPERIENCE_MISS_THRESHOLD = 4;
+const EXPERIENCE_DRAW_COUNT = 3;
 
 // ==================== PSYCHOMETRICS DATA (for tooltips) ====================
 const CONSTRUCTS = {
@@ -1419,11 +1441,31 @@ const counts = {
     });
     return shuffle(deck);
 }
-function drawCards(player, n) {
+function drawCards(player, n, { allowOverflow = false } = {}) {
     for (let i = 0; i < n; i++) {
-        if (player.hand.length >= MAX_HAND_SIZE) break;
+        if (!allowOverflow && player.hand.length >= MAX_HAND_SIZE) break;
         if (player.deck.length > 0) player.hand.push(player.deck.pop());
     }
+}
+function enforceHandLimit(player, pid, reason = 'draw') {
+    const overflow = Math.max(0, player.hand.length - MAX_HAND_SIZE);
+    if (overflow > 0) {
+        player.pendingDiscard = overflow;
+        logLocal(`P${pid} must trash ${overflow} card${overflow === 1 ? '' : 's'} after ${reason} (max hand ${MAX_HAND_SIZE}).`, 'info-log');
+    }
+}
+function grantExperienceToken(player, pid) {
+    player.experienceTokens = (player.experienceTokens || 0) + 1;
+    const towardDraw = player.experienceTokens % EXPERIENCE_MISS_THRESHOLD;
+    const remaining = towardDraw === 0 ? 0 : EXPERIENCE_MISS_THRESHOLD - towardDraw;
+    if (remaining === 0) {
+        logLocal(`P${pid} gains an Experience token (${player.experienceTokens}). Experience Draw is ready!`, 'meta-log');
+    } else {
+        logLocal(`P${pid} gains an Experience token (${player.experienceTokens}). ${remaining} more miss${remaining === 1 ? '' : 'es'} to unlock Experience Draw.`, 'info-log');
+    }
+}
+function canUseExperienceDraw(player) {
+    return (player?.experienceTokens || 0) >= EXPERIENCE_MISS_THRESHOLD;
 }
 function firstEmptySlot(arr) { return arr.findIndex(x => x === null); }
 function makeConstructStackFromCard(card) {
@@ -1550,7 +1592,8 @@ function maybeDeckOutDamage(player, pid) {
 function startTurnFor(pid) {
     const p = localGame.players[pid];
     p.summoned = false;
-    drawCards(p, 1);
+    drawCards(p, 1, { allowOverflow: true });
+    enforceHandLimit(p, pid, 'turn draw');
     p.monsters.forEach(m => {
         if (m) {
             m.summoningSick = false;
@@ -1661,8 +1704,8 @@ function initLocalGame() {
         log: [],
         mulligan: { phase: true, done: { 1: false, 2: false } },
         players: {
-            1: { lp: 8000, deck: buildStartingDeck(), hand: [], constructs: [null, null, null], monsters: [null, null, null], summoned: false },
-            2: { lp: 8000, deck: buildStartingDeck(), hand: [], constructs: [null, null, null], monsters: [null, null, null], summoned: false }
+            1: { lp: 8000, deck: buildStartingDeck(), hand: [], constructs: [null, null, null], monsters: [null, null, null], summoned: false, experienceTokens: 0, pendingDiscard: 0 },
+            2: { lp: 8000, deck: buildStartingDeck(), hand: [], constructs: [null, null, null], monsters: [null, null, null], summoned: false, experienceTokens: 0, pendingDiscard: 0 }
         }
     };
 
@@ -1693,6 +1736,9 @@ function projectStateForPlayer(pid) {
         my_monsters: deepClone(me.monsters),
         opp_monsters: deepClone(opp.monsters),
         my_summoned: me.summoned,
+        my_experience_tokens: me.experienceTokens || 0,
+        opp_experience_tokens: opp.experienceTokens || 0,
+        pending_discard_count: me.pendingDiscard || 0,
         mulligan_pending: !!(localGame.mulligan?.phase && !localGame.mulligan.done[pid]),
         mulligan_done: !!(localGame.mulligan?.done?.[pid]),
         log: deepClone(localGame.log)
@@ -1753,7 +1799,12 @@ function applyLocalMove(pid, move) {
 
     const me = localGame.players[pid];
     const opp = localGame.players[pid === 1 ? 2 : 1];
+    const pendingDiscard = me.pendingDiscard || 0;
     let move_result = null;
+
+    if (pendingDiscard > 0 && move.type !== 'discard_card') {
+        return { success: false, message: `Trash ${pendingDiscard} card${pendingDiscard === 1 ? '' : 's'} first` };
+    }
 
     const removeHandCard = (idx) => {
         if (idx < 0 || idx >= me.hand.length) return null;
@@ -1773,6 +1824,22 @@ function applyLocalMove(pid, move) {
         else existing.cards.push(deepClone(placed));
         const stack = me.constructs[slotIdx];
         logLocal(`P${pid} places ${placed.construct} (${stack.cards.length}/3) in construct slot ${slotIdx + 1}.`, 'formula-log');
+    }
+    else if (move.type === 'discard_card') {
+        if (pendingDiscard <= 0) return { success: false, message: 'No discard required' };
+        const trashed = removeHandCard(move.hand_index);
+        if (!trashed) return { success: false, message: 'Invalid hand index' };
+        me.pendingDiscard = Math.max(0, (me.pendingDiscard || 0) - 1);
+        logLocal(`P${pid} trashes ${trashed.isItem ? trashed.short : trashed.name} (${me.pendingDiscard} remaining).`, 'info-log');
+    }
+    else if (move.type === 'experience_draw') {
+        if (!canUseExperienceDraw(me)) return { success: false, message: 'Need 4 Experience tokens' };
+        me.experienceTokens -= EXPERIENCE_MISS_THRESHOLD;
+        drawCards(me, EXPERIENCE_DRAW_COUNT, { allowOverflow: true });
+        enforceHandLimit(me, pid, 'Experience Draw');
+        maybeDeckOutDamage(me, pid);
+        move_result = { experience_draw: true };
+        logLocal(`P${pid} spends ${EXPERIENCE_MISS_THRESHOLD} Experience tokens to draw ${EXPERIENCE_DRAW_COUNT} cards.`, 'meta-log');
     }
     else if (move.type === 'summon') {
         if (me.summoned) return { success: false, message: 'You can only summon once per turn' };
@@ -1938,6 +2005,7 @@ function applyLocalMove(pid, move) {
         let attackSampleResult = null;
         if (!hit) {
             logLocal(`P${pid}'s ${attacker.name} attacks and rolls ${roll} (needs ≤ ${threshold}). Type II error — attack misses.`, 'battle-log');
+            grantExperienceToken(me, pid);
             attackSampleResult = consumeAttackSample(attacker);
         } else {
             const opponentHasMonsters = opp.monsters.some(monster => monster !== null);
@@ -2005,6 +2073,7 @@ function applyLocalMove(pid, move) {
         logLocal(`P${pid} performs META-ANALYSIS and summons ${meta.name}! (ATK ${meta.atk}, PWR ${Math.floor(meta.power * 100)}%)`, 'meta-log');
     }
     else if (move.type === 'end_turn') {
+        if ((me.pendingDiscard || 0) > 0) return { success: false, message: 'Resolve discard before ending turn' };
         clearEndOfTurnEffects(pid);
         const nextPid = pid === 1 ? 2 : 1;
         localGame.currentPlayer = nextPid;
@@ -2061,6 +2130,15 @@ function enumerateCandidateMoves(state, pid) {
             }
         }
     });
+
+    if ((p.pendingDiscard || 0) > 0) {
+        p.hand.forEach((_, hand_index) => moves.push({ type: 'discard_card', hand_index }));
+        return moves;
+    }
+
+    if (canUseExperienceDraw(p) && p.deck.length > 0) {
+        moves.push({ type: 'experience_draw' });
+    }
 
     if (!p.summoned && firstEmptySlot(p.monsters) !== -1) {
         for (let pred_slot = 0; pred_slot < 3; pred_slot++) {
@@ -2594,6 +2672,7 @@ function renderAll() {
     }
     updateLP();
     updateButtons();
+    renderExperiencePanel();
     document.getElementById('deck-count').textContent = `DECK: ${gs.my_deck_count}`;
 
     const ti = document.getElementById('turn-indicator');
@@ -2606,6 +2685,24 @@ function renderAll() {
     }
 
     syncMulliganOverlay();
+}
+
+function renderExperiencePanel() {
+    if (!gs) return;
+    const wrap = document.getElementById('experience-tokens');
+    const text = document.getElementById('experience-text');
+    const total = gs.my_experience_tokens || 0;
+    const readySets = Math.floor(total / EXPERIENCE_MISS_THRESHOLD);
+    const remainder = total % EXPERIENCE_MISS_THRESHOLD;
+    wrap.innerHTML = '';
+    for (let i = 0; i < remainder; i++) {
+        const t = document.createElement('div');
+        t.className = 'xp-token';
+        wrap.appendChild(t);
+    }
+    text.textContent = readySets > 0
+        ? `Ready: ${readySets} × Draw ${EXPERIENCE_DRAW_COUNT}`
+        : `${remainder} / ${EXPERIENCE_MISS_THRESHOLD} misses`;
 }
 
 function updateLP() {
@@ -2627,6 +2724,7 @@ function updateLP() {
 function updateButtons() {
     if (!gs) return;
     const mulliganPending = isMulliganPending();
+    const mustDiscard = (gs.pending_discard_count || 0) > 0;
     const isMyTurn = gs.is_my_turn && !gameOver && !mulliganPending;
     const isIdle = uiPhase === 'idle';
 
@@ -2636,11 +2734,19 @@ function updateButtons() {
     const canAttack = gs.my_monsters.some(m => canMonsterAttack(m));
     const canMeta = getMetaTarget() !== null;
 
-    document.getElementById('btn-summon').disabled = !(isMyTurn && canSummon && isIdle);
-    document.getElementById('btn-meta').disabled = !(isMyTurn && canMeta && isIdle);
-    document.getElementById('btn-attack').disabled = !(isMyTurn && canAttack && isIdle);
-    document.getElementById('btn-end').disabled = !(isMyTurn && isIdle);
+    document.getElementById('btn-summon').disabled = !(isMyTurn && canSummon && isIdle && !mustDiscard);
+    document.getElementById('btn-meta').disabled = !(isMyTurn && canMeta && isIdle && !mustDiscard);
+    document.getElementById('btn-attack').disabled = !(isMyTurn && canAttack && isIdle && !mustDiscard);
+    document.getElementById('btn-end').disabled = !(isMyTurn && isIdle && !mustDiscard);
+    document.getElementById('btn-experience-draw').disabled = !(isMyTurn && isIdle && !mustDiscard && (gs.my_experience_tokens || 0) >= EXPERIENCE_MISS_THRESHOLD && gs.my_deck_count > 0);
     document.getElementById('btn-cancel').style.display = (uiPhase !== 'idle' && isMyTurn) ? 'block' : 'none';
+
+    const handLabel = document.querySelector('.hand-label span');
+    if (handLabel) {
+        handLabel.textContent = mustDiscard
+            ? `TRASH ${gs.pending_discard_count} CARD${gs.pending_discard_count === 1 ? '' : 'S'} TO CONTINUE`
+            : 'YOUR HAND';
+    }
 }
 
 function getMetaTarget() {
@@ -2790,6 +2896,10 @@ function cancelAction() {
 
 function selectHandCard(idx) {
     if (isMulliganPending()) return;
+    if ((gs.pending_discard_count || 0) > 0) {
+        discardHandCard(idx);
+        return;
+    }
     if (!gs?.is_my_turn || gameOver || uiPhase.startsWith('attack') || uiPhase.startsWith('summon')) return;
     if (selectedHandCard === idx) { cancelAction(); return; }
 
@@ -2835,6 +2945,21 @@ function selectHandCard(idx) {
         }
     }
     renderAll();
+}
+
+async function discardHandCard(idx) {
+    if ((gs?.pending_discard_count || 0) <= 0) return;
+    selectedHandCard = null;
+    uiPhase = 'idle';
+    await submitMove({ type: 'discard_card', hand_index: idx });
+}
+
+async function useExperienceDraw() {
+    if (isMulliganPending()) return;
+    if (!gs?.is_my_turn || (gs.pending_discard_count || 0) > 0) return;
+    selectedHandCard = null;
+    uiPhase = 'idle';
+    await submitMove({ type: 'experience_draw' });
 }
 
 // --- Construct placement ---

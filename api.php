@@ -15,6 +15,8 @@ if (!is_dir($DATA_DIR)) mkdir($DATA_DIR, 0777, true);
 
 const MAX_HAND_SIZE = 12;
 const STARTING_HAND_SIZE = 12;
+const EXPERIENCE_MISS_THRESHOLD = 4;
+const EXPERIENCE_DRAW_COUNT = 3;
 const MONSTER_BASE_N = 50;
 const META_BASE_N = 50;
 
@@ -322,10 +324,29 @@ function buildDeck() {
     return $deck;
 }
 
-function drawCards(&$player, $n) {
+function drawCards(&$player, $n, $allowOverflow = false) {
     for ($i = 0; $i < $n; $i++) {
-        if (count($player['hand']) >= MAX_HAND_SIZE) break;
+        if (!$allowOverflow && count($player['hand']) >= MAX_HAND_SIZE) break;
         if (count($player['deck']) > 0) $player['hand'][] = array_pop($player['deck']);
+    }
+}
+
+function enforceHandLimit(&$state, &$player, $pNum, $reason = 'draw') {
+    $overflow = max(0, count($player['hand']) - MAX_HAND_SIZE);
+    if ($overflow > 0) {
+        $player['pending_discard'] = $overflow;
+        $state['log'][] = ['msg' => "P{$pNum} must trash {$overflow} card" . ($overflow === 1 ? '' : 's') . " after {$reason}.", 'type' => 'info-log'];
+    }
+}
+
+function grantExperienceToken(&$state, &$player, $pNum) {
+    $player['experience_tokens'] = (int)($player['experience_tokens'] ?? 0) + 1;
+    $toward = $player['experience_tokens'] % EXPERIENCE_MISS_THRESHOLD;
+    $remain = $toward === 0 ? 0 : EXPERIENCE_MISS_THRESHOLD - $toward;
+    if ($remain === 0) {
+        $state['log'][] = ['msg' => "P{$pNum} gains an Experience token ({$player['experience_tokens']}). Experience Draw is ready!", 'type' => 'meta-log'];
+    } else {
+        $state['log'][] = ['msg' => "P{$pNum} gains an Experience token ({$player['experience_tokens']}). {$remain} more miss" . ($remain === 1 ? '' : 'es') . ' to unlock Draw 3.', 'type' => 'info-log'];
     }
 }
 
@@ -364,8 +385,8 @@ function createRoom() {
         'winner' => null,
         'last_update' => time(),
         'mulligan' => ['phase' => true, 'done' => ['1' => false, '2' => false]],
-        'player1' => ['lp'=>8000,'hand'=>[],'deck'=>$deck1,'constructs'=>[null,null,null],'monsters'=>[null,null,null],'summoned_this_turn'=>false],
-        'player2' => ['lp'=>8000,'hand'=>[],'deck'=>$deck2,'constructs'=>[null,null,null],'monsters'=>[null,null,null],'summoned_this_turn'=>false],
+        'player1' => ['lp'=>8000,'hand'=>[],'deck'=>$deck1,'constructs'=>[null,null,null],'monsters'=>[null,null,null],'summoned_this_turn'=>false,'experience_tokens'=>0,'pending_discard'=>0],
+        'player2' => ['lp'=>8000,'hand'=>[],'deck'=>$deck2,'constructs'=>[null,null,null],'monsters'=>[null,null,null],'summoned_this_turn'=>false,'experience_tokens'=>0,'pending_discard'=>0],
         'log' => []
     ];
 
@@ -489,6 +510,9 @@ function submitMove($input) {
 }
 
 function processMove(&$state, &$me, &$opp, $pNum, $move) {
+    if (!empty($me['pending_discard']) && ($move['type'] ?? '') !== 'discard_card') {
+        return ['ok'=>false,'msg'=>'Trash required cards first'];
+    }
     $type = $move['type'] ?? '';
     switch ($type) {
         case 'place_card': return movePlaceCard($state, $me, $pNum, $move);
@@ -496,9 +520,33 @@ function processMove(&$state, &$me, &$opp, $pNum, $move) {
         case 'play_spell': return movePlaySpell($state, $me, $opp, $pNum, $move);
         case 'attack': return moveAttack($state, $me, $opp, $pNum, $move);
         case 'meta': return moveMeta($state, $me, $pNum);
+        case 'experience_draw': return moveExperienceDraw($state, $me, $pNum);
+        case 'discard_card': return moveDiscardCard($state, $me, $pNum, $move);
         case 'end_turn': return moveEndTurn($state, $me, $opp, $pNum);
         default: return ['ok'=>false,'msg'=>'Unknown move type'];
     }
+}
+
+function moveDiscardCard(&$state, &$me, $pNum, $move) {
+    $need = (int)($me['pending_discard'] ?? 0);
+    if ($need <= 0) return ['ok'=>false,'msg'=>'No discard required'];
+    $handIdx = (int)($move['hand_index'] ?? -1);
+    if ($handIdx < 0 || $handIdx >= count($me['hand'])) return ['ok'=>false,'msg'=>'Invalid hand index'];
+    $card = $me['hand'][$handIdx];
+    array_splice($me['hand'], $handIdx, 1);
+    $me['pending_discard'] = max(0, $need - 1);
+    $name = !empty($card['isItem']) ? ($card['short'] ?? 'item') : ($card['name'] ?? 'card');
+    $state['log'][] = ['msg' => "P{$pNum} trashes {$name} ({$me['pending_discard']} remaining).", 'type' => 'info-log'];
+    return ['ok'=>true,'msg'=>'Card trashed'];
+}
+
+function moveExperienceDraw(&$state, &$me, $pNum) {
+    if ((int)($me['experience_tokens'] ?? 0) < EXPERIENCE_MISS_THRESHOLD) return ['ok'=>false,'msg'=>'Need 4 Experience tokens'];
+    $me['experience_tokens'] -= EXPERIENCE_MISS_THRESHOLD;
+    drawCards($me, EXPERIENCE_DRAW_COUNT, true);
+    enforceHandLimit($state, $me, $pNum, 'Experience Draw');
+    $state['log'][] = ['msg' => "P{$pNum} spends 4 Experience tokens and draws 3 cards.", 'type' => 'meta-log'];
+    return ['ok'=>true,'msg'=>'Experience Draw'];
 }
 
 function movePlaceCard(&$state, &$me, $pNum, $move) {
@@ -704,6 +752,7 @@ function moveAttack(&$state, &$me, &$opp, $pNum, $move) {
 
     if (!$hit) {
         $state['log'][] = ['msg' => "P{$pNum}'s {$attacker['name']} misses (roll {$roll}, needs ≤ {$threshold}).", 'type' => 'battle-log'];
+        grantExperienceToken($state, $me, $pNum);
         consumeAttackSample($attacker);
         $result['msg'] = 'Type II Error! Attack missed.';
         return $result;
@@ -840,6 +889,7 @@ function clearEndOfTurnEffects(&$player) {
 }
 
 function moveEndTurn(&$state, &$me, &$opp, $pNum) {
+    if (!empty($me['pending_discard'])) return ['ok'=>false,'msg'=>'Resolve required trash first'];
     clearEndOfTurnEffects($me);
 
     $state['current_turn'] = $pNum === 1 ? 2 : 1;
@@ -847,7 +897,8 @@ function moveEndTurn(&$state, &$me, &$opp, $pNum) {
 
     $opp['summoned_this_turn'] = false;
     resetMonstersForTurn($opp);
-    drawCards($opp, 1);
+    drawCards($opp, 1, true);
+    enforceHandLimit($state, $opp, $pNum === 1 ? 2 : 1, 'turn draw');
 
     $state['log'][] = ['msg' => "P{$pNum} ends turn.", 'type' => 'info-log'];
     return ['ok'=>true,'msg'=>'Turn ended','turn_ended'=>true];
@@ -873,6 +924,9 @@ function filterStateForPlayer($state, $pNum) {
         'my_constructs' => $state[$meKey]['constructs'],
         'my_monsters' => $state[$meKey]['monsters'],
         'my_summoned' => $state[$meKey]['summoned_this_turn'],
+        'my_experience_tokens' => (int)($state[$meKey]['experience_tokens'] ?? 0),
+        'opp_experience_tokens' => (int)($state[$oppKey]['experience_tokens'] ?? 0),
+        'pending_discard_count' => (int)($state[$meKey]['pending_discard'] ?? 0),
 
         'opp_lp' => $state[$oppKey]['lp'],
         'opp_hand_count' => count($state[$oppKey]['hand']),
