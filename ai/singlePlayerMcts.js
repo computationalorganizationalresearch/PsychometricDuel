@@ -10,7 +10,11 @@
             noise: 0.2,
             wideningStep: 3,
             tacticalDepthBonus: 1,
-            simulationTemperature: 1.25
+            simulationTemperature: 1.25,
+            maxThinkPerMove: 320,
+            maxSimulations: 240,
+            turnBudgetMs: 900,
+            maxChainMoves: 8
         },
         balanced: {
             label: 'Balanced',
@@ -22,7 +26,11 @@
             noise: 0.08,
             wideningStep: 4,
             tacticalDepthBonus: 2,
-            simulationTemperature: 1.0
+            simulationTemperature: 1.0,
+            maxThinkPerMove: 700,
+            maxSimulations: 520,
+            turnBudgetMs: 1600,
+            maxChainMoves: 10
         },
         strong: {
             label: 'Strong',
@@ -34,7 +42,11 @@
             noise: 0.02,
             wideningStep: 5,
             tacticalDepthBonus: 3,
-            simulationTemperature: 0.85
+            simulationTemperature: 0.85,
+            maxThinkPerMove: 1200,
+            maxSimulations: 900,
+            turnBudgetMs: 2400,
+            maxChainMoves: 12
         },
         expert: {
             label: 'Expert',
@@ -46,7 +58,11 @@
             noise: 0,
             wideningStep: 6,
             tacticalDepthBonus: 4,
-            simulationTemperature: 0.65
+            simulationTemperature: 0.65,
+            maxThinkPerMove: 1700,
+            maxSimulations: 1300,
+            turnBudgetMs: 3200,
+            maxChainMoves: 14
         }
     };
 
@@ -91,6 +107,56 @@
         const moveCache = new Map();
         const evalCache = new Map();
         const transitionCache = new Map();
+        const transpositionTable = new Map();
+        const criticalityCache = new Map();
+        const objectHashCache = new WeakMap();
+
+        const VALUE_CLAMP = 5000;
+        const MIN_SIM_TEMP = 0.18;
+        const MAX_SIM_TEMP = 1.35;
+        const EARLY_STOP_VISIT_SHARE = 0.68;
+        const EARLY_STOP_MIN_VISITS = 110;
+
+        const MAX_MOVE_CACHE = 900;
+        const MAX_EVAL_CACHE = 1800;
+        const MAX_TRANSITION_CACHE = 1800;
+        const MAX_TT_ENTRIES = 2200;
+        const MAX_CRITICALITY_CACHE = 1200;
+
+        function clamp(value, min, max) {
+            return Math.max(min, Math.min(max, value));
+        }
+
+        function setWithLimit(map, key, value, maxSize) {
+            if (map.has(key)) {
+                map.set(key, value);
+                return;
+            }
+            if (map.size >= maxSize) {
+                const oldest = map.keys().next();
+                if (!oldest.done) map.delete(oldest.value);
+            }
+            map.set(key, value);
+        }
+
+        function resetSearchCaches() {
+            moveCache.clear();
+            evalCache.clear();
+            transitionCache.clear();
+            transpositionTable.clear();
+            criticalityCache.clear();
+        }
+
+        function cachedStateKey(state, pid) {
+            if (state && typeof state === 'object') {
+                const cached = objectHashCache.get(state);
+                if (cached && cached.pid === pid) return cached.key;
+                const key = stateKey(state, pid);
+                objectHashCache.set(state, { pid, key });
+                return key;
+            }
+            return stateKey(state, pid);
+        }
 
         class TreeNode {
             constructor({ state, pid, rootPid, parent = null, move = null, prior = 1, isRoot = false }) {
@@ -108,7 +174,7 @@
                 this.expanded = false;
                 this.terminal = !state || state.status !== 'active';
                 this.candidateMoves = null;
-                this.stateHash = stateKey(state, pid);
+                this.stateHash = cachedStateKey(state, pid);
             }
 
             qValue() {
@@ -117,15 +183,15 @@
         }
 
         function simulateWithCache(state, pid, move) {
-            const key = `${stateKey(state, pid)}|${moveKey(move)}`;
+            const key = `${cachedStateKey(state, pid)}|${moveKey(move)}`;
             if (transitionCache.has(key)) return transitionCache.get(key);
             const result = adapter.simulateMove(state, pid, move);
-            transitionCache.set(key, result);
+            setWithLimit(transitionCache, key, result, MAX_TRANSITION_CACHE);
             return result;
         }
 
         function enumerateWithCache(state, pid, includeEndTurn) {
-            const key = `${stateKey(state, pid)}|${includeEndTurn ? 'withEnd' : 'withoutEnd'}`;
+            const key = `${cachedStateKey(state, pid)}|${includeEndTurn ? 'withEnd' : 'withoutEnd'}`;
             if (!moveCache.has(key)) {
                 const baseMoves = adapter.enumerateMoves(state, pid) || [];
                 let moves = baseMoves.slice();
@@ -133,29 +199,38 @@
                     const hasEnd = moves.some(move => move && move.type === 'end_turn');
                     if (!hasEnd) moves.push({ type: 'end_turn' });
                 }
-                moveCache.set(key, moves);
+                setWithLimit(moveCache, key, moves, MAX_MOVE_CACHE);
             }
             return moveCache.get(key);
         }
 
         function evaluateWithCache(state, rootPid) {
-            const key = `${stateKey(state, rootPid)}|eval`;
+            const key = `${cachedStateKey(state, rootPid)}|eval`;
             if (!evalCache.has(key)) {
-                evalCache.set(key, adapter.evaluateState(state, rootPid));
+                setWithLimit(evalCache, key, adapter.evaluateState(state, rootPid), MAX_EVAL_CACHE);
             }
             return evalCache.get(key);
         }
 
+        function transpositionStats(node) {
+            return transpositionTable.get(node.stateHash) || null;
+        }
+
         function profileCriticality(state, pid) {
+            const cacheKey = `${cachedStateKey(state, pid)}|criticality`;
+            if (criticalityCache.has(cacheKey)) return criticalityCache.get(cacheKey);
+
             const moves = enumerateWithCache(state, pid, true);
             const branching = moves.length;
             if (!branching) {
-                return {
+                const empty = {
                     branching,
                     tacticalVolatility: 0,
                     closeContest: 0,
                     criticality: 0
                 };
+                setWithLimit(criticalityCache, cacheKey, empty, MAX_CRITICALITY_CACHE);
+                return empty;
             }
 
             const scored = [];
@@ -173,7 +248,9 @@
             const branchFactor = branching > 20 ? 1 : branching > 12 ? 0.65 : 0.35;
             const criticality = Math.min(1, (closeContest * 0.45) + (tacticalVolatility * 0.35) + (branchFactor * 0.2));
 
-            return { branching, tacticalVolatility, closeContest, criticality };
+            const result = { branching, tacticalVolatility, closeContest, criticality };
+            setWithLimit(criticalityCache, cacheKey, result, MAX_CRITICALITY_CACHE);
+            return result;
         }
 
         function resolveProfile(state) {
@@ -183,8 +260,8 @@
             const diagnostics = profileCriticality(state, currentPid);
 
             const branchingBonus = diagnostics.branching > 24 ? 1400 : diagnostics.branching > 16 ? 700 : diagnostics.branching > 10 ? 300 : 0;
-            const criticalityBonus = Math.floor(profile.thinkMs * 0.85 * diagnostics.criticality);
-            const maxThink = Math.floor(profile.thinkMs * 2.4);
+            const criticalityBonus = Math.floor(profile.thinkMs * 0.45 * diagnostics.criticality);
+            const maxThink = Math.floor(profile.thinkMs * 1.35);
 
             return {
                 ...profile,
@@ -287,8 +364,15 @@
         }
 
         function puctScore(parent, child, exploration) {
-            const q = child.visits > 0 ? child.valueSum / child.visits : 0;
-            const u = exploration * child.prior * Math.sqrt(parent.visits + 1) / (1 + child.visits);
+            const localQ = child.visits > 0 ? child.valueSum / child.visits : 0;
+            const transposed = transpositionStats(child);
+            const ttVisits = transposed ? transposed.visits : 0;
+            const ttQ = ttVisits > 0 ? transposed.valueSum / ttVisits : 0;
+            const blend = ttVisits > 0 ? clamp(ttVisits / (ttVisits + child.visits + 10), 0.12, 0.7) : 0;
+            const q = localQ * (1 - blend) + (ttQ * blend);
+
+            const dynamicExploration = exploration * (1 + (0.45 / (1 + Math.sqrt(child.visits + ttVisits))));
+            const u = dynamicExploration * child.prior * Math.sqrt(parent.visits + 1) / (1 + child.visits + (ttVisits * 0.5));
             return q + u;
         }
 
@@ -321,12 +405,19 @@
             }
             if (!scored.length) return null;
 
-            const temp = Math.max(0.2, profile.simulationTemperature);
+            const temp = clamp(profile.simulationTemperature, MIN_SIM_TEMP, MAX_SIM_TEMP);
             const weighted = scored.map(item => ({
                 move: item.move,
                 weight: Math.exp((item.score - bestScore) / (35 * temp))
             }));
             return weightedPick(weighted);
+        }
+
+        function rolloutDepthForState(baseDepth, state, profile) {
+            const currentPid = state && state.currentPlayer;
+            const diagnostics = profileCriticality(state, currentPid);
+            const bonus = diagnostics.branching > 18 ? 1 : diagnostics.branching > 10 ? 2 : 3;
+            return baseDepth + bonus + Math.floor(profile.tacticalDepthBonus * diagnostics.criticality);
         }
 
         function simulateLeaf(node, profile) {
@@ -338,7 +429,7 @@
             let simPid = node.pid;
             let depth = 0;
             const baseDepth = profile.rolloutDepth;
-            let depthLimit = baseDepth;
+            let depthLimit = rolloutDepthForState(baseDepth, node.state, profile);
 
             while (simState.status === 'active' && depth < depthLimit) {
                 const move = rolloutPolicy(simState, simPid, node.rootPid, profile);
@@ -365,12 +456,60 @@
             for (let i = path.length - 1; i >= 0; i -= 1) {
                 const node = path[i];
                 node.visits += 1;
-                const signed = node.pid === rootPid ? value : -value;
+                const signed = clamp(node.pid === rootPid ? value : -value, -VALUE_CLAMP, VALUE_CLAMP);
                 node.valueSum += signed;
+
+                const existing = transpositionTable.get(node.stateHash);
+                if (existing) {
+                    existing.visits += 1;
+                    existing.valueSum += signed;
+                } else {
+                    setWithLimit(transpositionTable, node.stateHash, { visits: 1, valueSum: signed }, MAX_TT_ENTRIES);
+                }
             }
         }
 
+        function shouldEarlyStop(root, elapsedMs, thinkMs) {
+            if (!root.children || root.children.length < 2) return false;
+            if (elapsedMs < thinkMs * 0.45 || root.visits < EARLY_STOP_MIN_VISITS) return false;
+
+            let first = null;
+            let second = null;
+            for (let i = 0; i < root.children.length; i += 1) {
+                const child = root.children[i];
+                if (!first || child.visits > first.visits) {
+                    second = first;
+                    first = child;
+                } else if (!second || child.visits > second.visits) {
+                    second = child;
+                }
+            }
+            if (!first || !second) return false;
+
+            const share = first.visits / Math.max(1, root.visits);
+            const qGap = first.qValue() - second.qValue();
+            return share >= EARLY_STOP_VISIT_SHARE && qGap > 45;
+        }
+
+        function finalMoveSelection(children) {
+            if (!children.length) return null;
+            let best = children[0];
+            let bestScore = -Infinity;
+
+            for (let i = 0; i < children.length; i += 1) {
+                const child = children[i];
+                const score = (child.visits * 1.1) + (child.qValue() * 0.9);
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = child;
+                }
+            }
+            return best;
+        }
+
         function chooseMoveWithMcts(state, pid, profile) {
+            resetSearchCaches();
+
             const root = new TreeNode({
                 state,
                 pid,
@@ -382,8 +521,13 @@
             if (!root.children.length) return null;
             if (root.children.length === 1) return root.children[0].move;
 
+            const searchBudgetMs = Math.min(profile.thinkMs, profile.maxThinkPerMove || profile.thinkMs);
+            const simulationCap = Math.max(80, profile.maxSimulations || Math.floor(searchBudgetMs * 0.8));
+
             const start = performance.now();
-            while (performance.now() - start < profile.thinkMs) {
+            let iterations = 0;
+            while ((performance.now() - start) < searchBudgetMs && iterations < simulationCap) {
+                iterations += 1;
                 maybeWidenRoot(root, profile);
                 const path = [root];
                 let node = root;
@@ -408,6 +552,8 @@
 
                 const value = simulateLeaf(node, profile);
                 backpropagate(path, value, pid);
+
+                if (shouldEarlyStop(root, performance.now() - start, searchBudgetMs)) break;
             }
 
             root.children.sort((a, b) => {
@@ -415,20 +561,25 @@
                 return b.qValue() - a.qValue();
             });
 
+            const primary = finalMoveSelection(root.children);
             if (profile.noise > 0 && root.children.length > 1 && Math.random() < profile.noise) {
                 return root.children[1].move;
             }
-            return root.children[0].move;
+            return primary ? primary.move : root.children[0].move;
         }
 
         async function playTurn(pid) {
             let state = adapter.getState();
             if (!state || state.status !== 'active' || state.currentPlayer !== pid) return;
             const profile = resolveProfile(state);
-            await new Promise(r => setTimeout(r, Math.max(120, profile.thinkMs * 0.22)));
+            await new Promise(r => setTimeout(r, Math.min(180, Math.max(60, profile.thinkMs * 0.12))));
+
+            const turnStarted = performance.now();
+            const turnBudgetMs = Math.max(300, profile.turnBudgetMs || profile.thinkMs);
+            const maxChainMoves = Math.max(4, profile.maxChainMoves || 10);
 
             let guard = 0;
-            while (guard++ < 16) {
+            while (guard++ < maxChainMoves && (performance.now() - turnStarted) < turnBudgetMs) {
                 state = adapter.getState();
                 if (!state || state.status !== 'active' || state.currentPlayer !== pid) break;
                 const move = chooseMoveWithMcts(state, pid, profile);
