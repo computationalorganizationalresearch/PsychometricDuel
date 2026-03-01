@@ -2693,8 +2693,7 @@ function syncDiscardWarningOverlay() {
         return;
     }
 
-    const discardStateToken = `${gs.pending_discard_seq || 0}:${gs.turn_number || 0}:${mustDiscardCount}:${gs.my_hand.length || 0}`;
-    const discardStateToken = `${gs.turn_number || 0}:${mustDiscardCount}:${gs.my_hand.length || 0}`;
+    var discardStateToken = `${gs.pending_discard_seq || 0}:${gs.turn_number || 0}:${mustDiscardCount}:${gs.my_hand.length || 0}`;
     if (discardStateToken !== discardPromptStateToken) {
         discardPromptStateToken = discardStateToken;
         discardPromptAcknowledged = false;
