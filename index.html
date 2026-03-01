@@ -1538,6 +1538,7 @@ function buildMonster(predStack, outStack) {
 function buildMetaMonster(monsters) {
     const meanR = monsters.reduce((s, m) => s + Math.abs(m.rObs || 0), 0) / monsters.length;
     const metaRTrue = clamp(meanR * 1.35, 0.35, 0.95);
+    const combinedBaseN = monsters.reduce((sum, m) => sum + (m?.baseN ?? 50), 0);
 
     return {
         name: getMetaTitanName(monsters),
@@ -1554,11 +1555,11 @@ function buildMetaMonster(monsters) {
         rObs: metaRTrue,
         baseAtk: Math.round(Math.abs(metaRTrue) * 10000),
         atk: 0,
-        baseN: 50,
-        n: 50,
+        baseN: combinedBaseN,
+        n: combinedBaseN,
         power: 0.97,
         attacksMade: 0,
-        maxAttacks: 2,
+        maxAttacks: 1,
         summoningSick: false,
         hasJobRelevance: false,
         hasImputation: false,
@@ -1607,7 +1608,7 @@ function startTurnFor(pid) {
         if (m) {
             m.summoningSick = false;
             m.attacksMade = 0;
-            m.maxAttacks = m.isMeta ? 2 : 1;
+            m.maxAttacks = 1;
             refreshMonsterStats(m);
         }
     });
