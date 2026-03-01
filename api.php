@@ -335,6 +335,7 @@ function enforceHandLimit(&$state, &$player, $pNum, $reason = 'draw') {
     $overflow = max(0, count($player['hand']) - MAX_HAND_SIZE);
     if ($overflow > 0) {
         $player['pending_discard'] = $overflow;
+        $player['discard_prompt_seq'] = (int)($player['discard_prompt_seq'] ?? 0) + 1;
         $state['log'][] = ['msg' => "P{$pNum} must trash {$overflow} card" . ($overflow === 1 ? '' : 's') . " after {$reason}.", 'type' => 'info-log'];
     }
 }
@@ -385,8 +386,8 @@ function createRoom() {
         'winner' => null,
         'last_update' => time(),
         'mulligan' => ['phase' => true, 'done' => ['1' => false, '2' => false]],
-        'player1' => ['lp'=>8000,'hand'=>[],'deck'=>$deck1,'constructs'=>[null,null,null],'monsters'=>[null,null,null],'summoned_this_turn'=>false,'experience_tokens'=>0,'pending_discard'=>0],
-        'player2' => ['lp'=>8000,'hand'=>[],'deck'=>$deck2,'constructs'=>[null,null,null],'monsters'=>[null,null,null],'summoned_this_turn'=>false,'experience_tokens'=>0,'pending_discard'=>0],
+        'player1' => ['lp'=>8000,'hand'=>[],'deck'=>$deck1,'constructs'=>[null,null,null],'monsters'=>[null,null,null],'summoned_this_turn'=>false,'experience_tokens'=>0,'pending_discard'=>0,'discard_prompt_seq'=>0],
+        'player2' => ['lp'=>8000,'hand'=>[],'deck'=>$deck2,'constructs'=>[null,null,null],'monsters'=>[null,null,null],'summoned_this_turn'=>false,'experience_tokens'=>0,'pending_discard'=>0,'discard_prompt_seq'=>0],
         'log' => []
     ];
 
@@ -942,6 +943,7 @@ function filterStateForPlayer($state, $pNum) {
         'my_experience_tokens' => (int)($state[$meKey]['experience_tokens'] ?? 0),
         'opp_experience_tokens' => (int)($state[$oppKey]['experience_tokens'] ?? 0),
         'pending_discard_count' => (int)($state[$meKey]['pending_discard'] ?? 0),
+        'pending_discard_seq' => (int)($state[$meKey]['discard_prompt_seq'] ?? 0),
 
         'opp_lp' => $state[$oppKey]['lp'],
         'opp_hand_count' => count($state[$oppKey]['hand']),

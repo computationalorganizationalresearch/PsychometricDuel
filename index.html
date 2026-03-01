@@ -2303,6 +2303,7 @@ let lastLogCount = 0;
 let mulliganSelection = new Set();
 let discardPromptRequiredForCount = 0;
 let discardPromptAcknowledged = false;
+let discardPromptStateToken = '';
 
 // ==================== API CALLS ====================
 async function apiCall(body) {
@@ -2435,6 +2436,11 @@ async function submitMove(move, skipRender = false) {
 
     if (!skipRender) {
         gs = res.state;
+
+        if (session.gameMode === 'online') {
+            const fresh = await apiCall({ action: 'poll', room_code: session.roomCode, player_token: session.playerToken });
+            if (fresh.success && fresh.state) gs = fresh.state;
+        }
 
         if (gs.log && gs.log.length > lastLogCount) {
             for (let i = lastLogCount; i < gs.log.length; i++) {
@@ -2683,7 +2689,14 @@ function syncDiscardWarningOverlay() {
         modal.classList.remove('active');
         discardPromptRequiredForCount = 0;
         discardPromptAcknowledged = false;
+        discardPromptStateToken = '';
         return;
+    }
+
+    var discardStateToken = `${gs.pending_discard_seq || 0}:${gs.turn_number || 0}:${mustDiscardCount}:${gs.my_hand.length || 0}`;
+    if (discardStateToken !== discardPromptStateToken) {
+        discardPromptStateToken = discardStateToken;
+        discardPromptAcknowledged = false;
     }
 
     if (mustDiscardCount !== discardPromptRequiredForCount) {
